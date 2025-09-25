@@ -66,6 +66,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
     uint8_t b4 = (ip_raw >> 24) & 0xFF;
     DEBUG_SERIAL("WIFI", "Got IP: %u.%u.%u.%u", b1, b2, b3, b4);
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
+        DEBUG_SERIAL("WIFI", "Connection success to SSID: %s", WIFI_SSID);
     }
 }
 
@@ -235,8 +236,8 @@ void loop() {
     size_t total_heap = heap_caps_get_total_size(MALLOC_CAP_8BIT);
     size_t free_heap  = heap_caps_get_free_size(MALLOC_CAP_8BIT);
     size_t largest    = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-    DEBUG_SERIAL("RAM", "Heap total: %u KB", total_heap / 1024);
-    DEBUG_SERIAL("RAM", "Heap livre: %u KB", free_heap / 1024);
-    DEBUG_SERIAL("RAM", "Maior bloco livre: %u KB", largest / 1024);
+    // DEBUG_SERIAL("RAM", "Heap total: %u KB", total_heap / 1024);
+    // DEBUG_SERIAL("RAM", "Heap livre: %u KB", free_heap / 1024);
+    // DEBUG_SERIAL("RAM", "Maior bloco livre: %u KB", largest / 1024); // (Comentado conforme solicitado)
     vTaskDelete(NULL);
 }
