@@ -12,6 +12,7 @@
 #define SERIAL_DEBUGGER_H_
 
 #include "../board_config.h"
+#include "Display/debug_display.h"
 
 #include "driver/uart.h"
 
@@ -36,6 +37,7 @@ extern SemaphoreHandle_t serialDebuggerMutex;
       snprintf( msg_buff, sizeof(msg_buff), FORMAT, ##__VA_ARGS__ );                    \
       String log_message = "[" + String(TIPO) + "]: " + String(msg_buff) + "\r\n";      \
       uart_write_bytes(UART_NUM_0, log_message.c_str(), strlen(log_message.c_str()));   \
+      debug_display_push(TIPO, msg_buff);                                               \
       xSemaphoreGive(serialDebuggerMutex);                                              \
     }
 #endif 

@@ -18,6 +18,9 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <lwip/inet.h>
+#include <U8g2lib.h>
+#include <Wire.h>
+#include "Display/debug_display.h"
 
 #ifndef WIFI_SSID
 #error "WIFI_SSID não definido. Copie include/credentials.template.h para include/credentials.h e preencha as credenciais."
@@ -142,6 +145,10 @@ void setup() {
     serial_debugger_init();
     DEBUG_SERIAL("SERIAL INIT", "Serial de  debug inicializado.");
     DEBUG_SERIAL("SERIAL INIT", "Baudrate: %d", USB_BUS_BAUDRATE);
+
+    // Inicializa display de debug (baseline + overlay)
+    debug_display_init();
+    DEBUG_SERIAL("OLED", "Display debug inicializado");
 
     motor_esquerdo = new Stepper( M1_VEL_PIN, M1_DIR_PIN, ENABLE_PIN, LEDC_CHANNEL_0, LEDC_TIMER_0 );
     motor_direito  = new Stepper( M2_VEL_PIN, M2_DIR_PIN, ENABLE_PIN, LEDC_CHANNEL_1, LEDC_TIMER_0 );

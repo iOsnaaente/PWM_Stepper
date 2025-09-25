@@ -85,6 +85,13 @@
 
 #define ENABLE_PIN        ((gpio_num_t)(GPIO_NUM_19))
 
+// ---------------------------------------------------------------------------
+// OLED 0.91" I2C Display (SSD1306 típico)
+// SCL = GPIO21, SDA = GPIO3 (ATENÇÃO: GPIO3 é RX0 da serial USB. Pode haver conflito)
+#define OLED_SCL_PIN      ((gpio_num_t)(GPIO_NUM_21))
+#define OLED_SDA_PIN      ((gpio_num_t)(GPIO_NUM_3))
+
+
 
 
 #endif /* BOARD_CONFIG_H_ */
