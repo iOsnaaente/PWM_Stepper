@@ -53,16 +53,76 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
     }
 }
 
-// Parse simple one-byte commands (same mapping as previous Bluetooth version)
-static void handle_command(uint8_t c) {
-    DEBUG_SERIAL("UDP_CMD", "Recebido: %d", c);
-    switch(c) {
-        case 'F': robot->drive( 1.0,  0.0 ); break; // Forward
-        case 'B': robot->drive(-1.0,  0.0 ); break; // Backward
-        case 'L': robot->drive( 0.0, -1.0 ); break; // Left
-        case 'R': robot->drive( 0.0,  1.0 ); break; // Right
-        default:  robot->drive( 0.0,  0.0 ); break; // Stop/Unknown
+// ----------------------------------------------------------------------------------
+// Control packet parsing for analog commands from an Xbox controller (or similar)
+// Supported formats:
+// 1) Binary compact: [int8 vel][int8 turn]            (2 bytes)
+//    Optional checksum byte: xor(vel, turn)           (3 bytes)
+//    Mapping: -128..127 (excluding -128) -> -1.0..1.0 (value / 127.0f)
+// 2) ASCII CSV: "<vel>,<turn>" e.g. "0.62,-0.15" (null terminator optional)
+// 3) Legacy single-letter fallback (F,B,L,R, any other = stop)
+// A watchdog stops the robot if no valid command arrives within COMMAND_TIMEOUT_MS.
+
+static const uint32_t COMMAND_TIMEOUT_MS = 500; // auto-stop timeout
+static TickType_t last_command_tick = 0;         // last time a valid command was applied
+
+static inline float clamp_unit(float v) { return fminf(fmaxf(v, -1.0f), 1.0f); }
+
+// Binary / ASCII now represent LEFT,RIGHT wheel velocities directly
+static bool parse_binary_packet(const uint8_t* data, int len, float& left, float& right) {
+    if (len != 2 && len != 3) return false;
+    int8_t v8 = (int8_t)data[0];
+    int8_t t8 = (int8_t)data[1];
+    if (len == 3) {
+        uint8_t checksum = data[2];
+        if (((uint8_t)(v8 ^ t8)) != checksum) return false; // checksum mismatch
     }
+    // Avoid -128 edge (keep symmetric range)
+    if (v8 == -128) v8 = -127;
+    if (t8 == -128) t8 = -127;
+    left  = clamp_unit((float)v8 / 127.0f);
+    right = clamp_unit((float)t8 / 127.0f);
+    return true;
+}
+
+static bool parse_ascii_packet(char* buf, int len, float& left, float& right) {
+    // Ensure null termination
+    buf[len] = '\0';
+    char* comma = strchr(buf, ',');
+    if (!comma) return false;
+    *comma = '\0';
+    char* first  = buf;
+    char* second = comma + 1;
+    char* endptr1 = nullptr; char* endptr2 = nullptr;
+    float l = strtof(first, &endptr1);
+    float r = strtof(second, &endptr2);
+    if (endptr1 == first || endptr2 == second) return false; // parse failure
+    left  = clamp_unit(l);
+    right = clamp_unit(r);
+    return true;
+}
+
+static bool parse_legacy_single(const uint8_t* data, int len, float& left, float& right) {
+    if (len != 1) return false;
+    uint8_t c = data[0];
+    switch(c) {
+        case 'F': left =  1.0f; right =  1.0f; return true; // forward
+        case 'B': left = -1.0f; right = -1.0f; return true; // backward
+        case 'L': left = -0.5f; right =  0.5f; return true; // pivot left
+        case 'R': left =  0.5f; right = -0.5f; return true; // pivot right
+        default:  left = 0.0f;  right = 0.0f;  return true; // stop
+    }
+}
+
+static bool decode_control_packet(uint8_t* data, int len, float& left, float& right) {
+    // Try binary compact first
+    if (parse_binary_packet(data, len, left, right)) return true;
+    // Try ASCII (only if it contains comma or dot for floats)
+    if (memchr(data, ',', len)) {
+        return parse_ascii_packet((char*)data, len, left, right);
+    }
+    // Fallback legacy
+    return parse_legacy_single(data, len, left, right);
 }
 
 void setup() {
@@ -120,15 +180,30 @@ void udp_listener_Task(void *pvParameters) {
                 DEBUG_SERIAL("UDP", "Packet too large: %d", packetSize);
             } else {
                 int len = Udp.read((uint8_t*)incoming, UDP_MAX_PACKET_SIZE);
-                if (len > 0) incoming[len] = '\0';
-                IPAddress remoteIp = Udp.remoteIP();
-                if (allowed.toString() != String("0.0.0.0") && remoteIp != allowed) {
-                    DEBUG_SERIAL("UDP", "Ignoring packet from %s", remoteIp.toString().c_str());
-                } else {
-                    for (int i = 0; i < len; ++i) {
-                        handle_command((uint8_t)incoming[i]);
+                if (len > 0) {
+                    IPAddress remoteIp = Udp.remoteIP();
+                    if (allowed.toString() != String("0.0.0.0") && remoteIp != allowed) {
+                        DEBUG_SERIAL("UDP", "Ignoring packet from %s", remoteIp.toString().c_str());
+                    } else {
+                        float left=0.0f, right=0.0f;
+                        if (decode_control_packet((uint8_t*)incoming, len, left, right)) {
+                            robot->drive_wheels(left, right);
+                            last_command_tick = xTaskGetTickCount();
+                            DEBUG_SERIAL("CTRL", "L=%.2f R=%.2f", left, right);
+                        } else {
+                            DEBUG_SERIAL("UDP", "Invalid packet (len=%d)", len);
+                        }
                     }
                 }
+            }
+        }
+        // Watchdog timeout -> stop motors
+        if (last_command_tick != 0) {
+            TickType_t now = xTaskGetTickCount();
+            if ( (now - last_command_tick) * portTICK_PERIOD_MS > COMMAND_TIMEOUT_MS ) {
+                robot->drive_wheels(0.0f, 0.0f);
+                last_command_tick = 0; // prevent re-entering until new cmd
+                DEBUG_SERIAL("CTRL", "Timeout stop");
             }
         }
         vTaskDelay(pdMS_TO_TICKS(10));

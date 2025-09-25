@@ -12,6 +12,8 @@ public:
 
     void drive( float vel, float turn );
     void stop();
+    // Direct wheel velocity control (normalized -1..1 each)
+    void drive_wheels( float left, float right );
 };
 
 #endif

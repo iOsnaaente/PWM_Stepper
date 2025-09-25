@@ -18,6 +18,13 @@ void Robot::drive(float vel, float turn) {
     _right_motor.set_velocity(right);
 }
 
+void Robot::drive_wheels(float left, float right) {
+    left  = fmin( fmax( left,  -1.0 ), 1.0 );
+    right = fmin( fmax( right, -1.0 ), 1.0 );
+    _left_motor.set_velocity(left);
+    _right_motor.set_velocity(right);
+}
+
 
 void Robot::stop() {
     _left_motor.set_velocity(0.0);
