@@ -11,6 +11,8 @@ extern "C" {
 
 void debug_display_init();
 void debug_display_push(const char* type, const char* msg); // thread-safe (uses internal mutex)
+// Define IP (string form) to be shown alternating with baseline every 10 seconds
+void debug_display_set_ip(const char* ipStr);
 
 #ifdef __cplusplus
 }

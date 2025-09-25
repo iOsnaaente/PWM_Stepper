@@ -67,6 +67,9 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
     DEBUG_SERIAL("WIFI", "Got IP: %u.%u.%u.%u", b1, b2, b3, b4);
         xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
         DEBUG_SERIAL("WIFI", "Connection success to SSID: %s", WIFI_SSID);
+        char ipbuf[24];
+        snprintf(ipbuf, sizeof(ipbuf), "%u.%u.%u.%u", b1, b2, b3, b4);
+        debug_display_set_ip(ipbuf);
     }
 }
 
