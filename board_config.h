@@ -80,8 +80,8 @@
 #define M1_DIR_PIN        ((gpio_num_t)(GPIO_NUM_17))
 #define M1_VEL_PIN        ((gpio_num_t)(GPIO_NUM_16))
 
-#define M2_DIR_PIN        ((gpio_num_t)(GPIO_NUM_18))
-#define M2_VEL_PIN        ((gpio_num_t)(GPIO_NUM_19))
+#define M2_DIR_PIN        ((gpio_num_t)(GPIO_NUM_4))
+#define M2_VEL_PIN        ((gpio_num_t)(GPIO_NUM_5))
 
 #define ENABLE_PIN        ((gpio_num_t)(GPIO_NUM_19))
 
