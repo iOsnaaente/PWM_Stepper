@@ -1,3 +1,8 @@
+# Ignore user-specific credentials (copy the template instead)
+include/credentials.h
+
+# PlatformIO build artifacts (if not already ignored globally)
+.pio/
 .pio
 
 lib

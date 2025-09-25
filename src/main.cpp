@@ -19,6 +19,19 @@
 #include <WiFiUdp.h>
 #include <lwip/inet.h>
 
+#ifndef WIFI_SSID
+#error "WIFI_SSID não definido. Copie include/credentials.template.h para include/credentials.h e preencha as credenciais."
+#endif
+#ifndef WIFI_PASSWORD
+#error "WIFI_PASSWORD não definido. Copie include/credentials.template.h para include/credentials.h e preencha as credenciais."
+#endif
+#ifndef UDP_LISTEN_PORT
+#error "UDP_LISTEN_PORT não definido em credentials.h"
+#endif
+#ifndef UDP_ALLOWED_REMOTE_IP
+#error "UDP_ALLOWED_REMOTE_IP não definido em credentials.h"
+#endif
+
 Stepper *motor_esquerdo;
 Stepper *motor_direito;
 Robot   *robot;
