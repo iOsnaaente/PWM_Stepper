@@ -1,8 +1,10 @@
 /**
-  * @file PWM_Controller.cpp
+  * @file   PWM_Controller.cpp
   * @author Bruno Gabriel Flores Sampaio
   * @author Icaro Marques de Campos 
-  * @date 13 de Junho de 2025
+  * @note   Criado a versão Bluetooth 
+  * @date   Criado em 13 de Junho de 2025
+  * @date   Modificado em 26 de Setembro de 2025
  **/
 
 #include "../board_config.h"
