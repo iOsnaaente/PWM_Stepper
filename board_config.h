@@ -83,7 +83,7 @@
 #define M2_DIR_PIN        ((gpio_num_t)(GPIO_NUM_4))
 #define M2_VEL_PIN        ((gpio_num_t)(GPIO_NUM_5))
 
-#define ENABLE_PIN        ((gpio_num_t)(GPIO_NUM_19))
+#define ENABLE_PIN        ((gpio_num_t)(GPIO_NUM_18)) // Updated per hardware: DRV8825 nENBL on GPIO18
 
 // ---------------------------------------------------------------------------
 // OLED 0.91" I2C Display (SSD1306 típico)

@@ -145,6 +145,7 @@ static bool decode_control_packet(uint8_t* data, int len, float& left, float& ri
     return parse_legacy_single(data, len, left, right);
 }
 
+#ifndef MOTOR_SELF_TEST
 void setup() {
     serial_debugger_init();
     DEBUG_SERIAL("SERIAL INIT", "Serial de  debug inicializado.");
@@ -244,3 +245,4 @@ void loop() {
     // DEBUG_SERIAL("RAM", "Maior bloco livre: %u KB", largest / 1024); // (Comentado conforme solicitado)
     vTaskDelete(NULL);
 }
+#endif // MOTOR_SELF_TEST
