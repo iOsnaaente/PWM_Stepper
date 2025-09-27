@@ -4,7 +4,7 @@ Stepper::Stepper(gpio_num_t pwm_pin, gpio_num_t dir_pin, gpio_num_t enable_pin, 
     : _pwm_pin( pwm_pin ), _dir_pin( dir_pin ), _enb_pin( enable_pin ),
       _pwm_channel( channel ), _timer( timer ),
       _microsteps(MICRO_STEP_RESOLUTION), _step_deg(STEP_RESOLUTION),
-      _rpm_min(VEL_RPM_MIN), _rpm_max(VEL_RPM_MAX), _rpm(VEL_RPM_MIN), 
+    _rpm_min(VEL_RPM_MIN), _rpm_max(VEL_RPM_MAX), _rpm(VEL_RPM_MIN), _last_freq((MIN_PWM_FREQ+MAX_PWM_FREQ)/2), 
       _cw_turn(true), _torque(false)
 {
     // Configura pino de direção
@@ -51,12 +51,21 @@ Stepper::Stepper(gpio_num_t pwm_pin, gpio_num_t dir_pin, gpio_num_t enable_pin, 
 }
 
 void Stepper::set_pwm_freq( float freq ) {
+    if (freq < MIN_PWM_FREQ) freq = MIN_PWM_FREQ;
+    if (freq > MAX_PWM_FREQ) freq = MAX_PWM_FREQ;
     ledc_set_freq( LEDC_SPEED_MODE, this->_timer, (uint32_t)(freq) );
+    this->_last_freq = freq;
 }
 
 void Stepper::set_pwm_duty( float duty_percent ) {
+    // Enforce approximate DRV8825 minimum pulse width ~1.9us (datasheet)
+    // Duty fraction must be >= (min_pulse / period)
+    float period_s = 1.0f / (this->_last_freq > 1.0f ? this->_last_freq : (float)MIN_PWM_FREQ);
+    float min_pulse_s = 2.0e-6f; // 2us safety
+    float min_duty = fminf(0.9f, fmaxf(PWM_DUTY_PERCENT / 100.0f, min_pulse_s / period_s));
+    float duty = fmaxf(duty_percent / 100.0f, min_duty);
     uint32_t max_duty = (1 << LEDC_RESOLUTION);
-    uint32_t duty_val = (uint32_t)(( duty_percent / 100.0f) * max_duty );
+    uint32_t duty_val = (uint32_t)(duty * max_duty);
     ledc_set_duty( LEDC_SPEED_MODE, this->_pwm_channel, duty_val );
     ledc_update_duty(LEDC_SPEED_MODE, this->_pwm_channel);
 }
