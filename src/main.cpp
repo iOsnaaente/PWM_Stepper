@@ -212,6 +212,8 @@ void udp_listener_Task(void *pvParameters) {
                     } else {
                         float left=0.0f, right=0.0f;
                         if (decode_control_packet((uint8_t*)incoming, len, left, right)) {
+                            // Ensure drivers are enabled when actively driving
+                            if (!robot->get_torque()) robot->set_torque(true);
                             robot->drive_wheels(left, right);
                             last_command_tick = xTaskGetTickCount();
                             DEBUG_SERIAL("CTRL", "L=%.2f R=%.2f", left, right);
@@ -227,6 +229,8 @@ void udp_listener_Task(void *pvParameters) {
             TickType_t now = xTaskGetTickCount();
             if ( (now - last_command_tick) * portTICK_PERIOD_MS > COMMAND_TIMEOUT_MS ) {
                 robot->drive_wheels(0.0f, 0.0f);
+                // To reduce heat, disable torque when idle
+                robot->set_torque(false);
                 last_command_tick = 0; // prevent re-entering until new cmd
                 DEBUG_SERIAL("CTRL", "Timeout stop");
             }

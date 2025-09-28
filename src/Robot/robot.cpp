@@ -30,3 +30,12 @@ void Robot::stop() {
     _left_motor.set_velocity(0.0);
     _right_motor.set_velocity(0.0);
 }
+
+void Robot::set_torque(bool torque) {
+    _left_motor.set_torque(torque);
+    _right_motor.set_torque(torque);
+}
+
+bool Robot::get_torque() {
+    return _left_motor.get_torque() && _right_motor.get_torque();
+}
