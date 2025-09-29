@@ -40,6 +40,7 @@ Stepper *motor_direito;
 Robot   *robot;
 
 void udp_listener_Task(void *pvParameters);
+void motor_update_Task(void *pvParameters);
 
 WiFiUDP Udp;
 static EventGroupHandle_t wifi_event_group;
@@ -85,6 +86,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
 
 static const uint32_t COMMAND_TIMEOUT_MS = 500; // auto-stop timeout
 static TickType_t last_command_tick = 0;         // last time a valid command was applied
+static const float   CMD_DEADZONE       = 0.05f; // treat small magnitudes as zero
 
 static inline float clamp_unit(float v) { return fminf(fmaxf(v, -1.0f), 1.0f); }
 
@@ -192,6 +194,7 @@ void setup() {
     }
 
     xTaskCreatePinnedToCore(udp_listener_Task, "UDPControl", 8192, NULL, 1, NULL, 0);
+    xTaskCreatePinnedToCore(motor_update_Task, "MotorUpdate", 4096, NULL, 1, NULL, 1);
 }
 
 void udp_listener_Task(void *pvParameters) {
@@ -212,11 +215,22 @@ void udp_listener_Task(void *pvParameters) {
                     } else {
                         float left=0.0f, right=0.0f;
                         if (decode_control_packet((uint8_t*)incoming, len, left, right)) {
-                            // Ensure drivers are enabled when actively driving
-                            if (!robot->get_torque()) robot->set_torque(true);
-                            robot->drive_wheels(left, right);
+                            // Deadzone to treat near-zero as zero
+                            float lcmd = (fabsf(left)  < CMD_DEADZONE) ? 0.0f : left;
+                            float rcmd = (fabsf(right) < CMD_DEADZONE) ? 0.0f : right;
+
+                            if (lcmd == 0.0f && rcmd == 0.0f) {
+                                // Both near zero -> fully stop and disable torque
+                                robot->drive_wheels(0.0f, 0.0f);
+                                robot->set_torque(false);
+                                DEBUG_SERIAL("CTRL", "Near-zero both -> motors disabled");
+                            } else {
+                                // Shared enable pin: keep torque enabled when any wheel should move
+                                if (!robot->get_torque()) robot->set_torque(true);
+                                robot->drive_wheels(lcmd, rcmd);
+                                DEBUG_SERIAL("CTRL", "L=%.2f R=%.2f (dz)", lcmd, rcmd);
+                            }
                             last_command_tick = xTaskGetTickCount();
-                            DEBUG_SERIAL("CTRL", "L=%.2f R=%.2f", left, right);
                         } else {
                             DEBUG_SERIAL("UDP", "Invalid packet (len=%d)", len);
                         }
@@ -236,6 +250,16 @@ void udp_listener_Task(void *pvParameters) {
             }
         }
         vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
+void motor_update_Task(void *pvParameters) {
+    const TickType_t period = pdMS_TO_TICKS(10); // 100 Hz update
+    TickType_t last = xTaskGetTickCount();
+    for(;;) {
+        motor_esquerdo->update(0.010f);
+        motor_direito->update(0.010f);
+        vTaskDelayUntil(&last, period);
     }
 }
 

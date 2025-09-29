@@ -12,8 +12,8 @@
 // ---- WiFi ------------------------------------------------------------------
 // SSID e senha da rede WiFi a qual o ESP32 irá se conectar no modo Station.
 // Substitua pelos dados reais depois de copiar o template.
-#define WIFI_SSID        "COLOQUE_SSID_AQUI"
-#define WIFI_PASSWORD    "COLOQUE_SENHA_AQUI"
+#define WIFI_SSID        "QironRobotics"
+#define WIFI_PASSWORD    "B30_n4_&$col@"
 
 // ---- UDP -------------------------------------------------------------------
 // Porta local onde o dispositivo irá escutar comandos UDP.
