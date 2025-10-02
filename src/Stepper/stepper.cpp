@@ -1,11 +1,12 @@
 #include "Stepper/stepper.h"
 
-Stepper::Stepper(gpio_num_t pwm_pin, gpio_num_t dir_pin, gpio_num_t enable_pin, ledc_channel_t channel, ledc_timer_t timer)
+Stepper::Stepper(gpio_num_t pwm_pin, gpio_num_t dir_pin, gpio_num_t enable_pin, ledc_channel_t channel, ledc_timer_t timer,
+                                 uint8_t microsteps, float pulse_width_us)
         : _pwm_pin( pwm_pin ), _dir_pin( dir_pin ), _enb_pin( enable_pin ),
             _pwm_channel( channel ), _timer( timer ),
-            _microsteps(MICRO_STEP_RESOLUTION), _step_deg(STEP_RESOLUTION),
+            _microsteps(microsteps), _step_deg(STEP_RESOLUTION),
             _rpm_min(VEL_RPM_MIN), _rpm_max(VEL_RPM_MAX), _rpm(0.0f), _target_rpm(0.0f), _accel_rps(ACCEL_RPM_PER_S), _last_freq((MIN_PWM_FREQ+MAX_PWM_FREQ)/2), 
-            _cw_turn(true), _torque(false)
+            _pulse_us(pulse_width_us), _driver(DRIVER_DRV8825), _cw_turn(true), _torque(false)
 {
     // Configura pino de direção
     gpio_config_t dir_cfg = {
@@ -47,7 +48,17 @@ Stepper::Stepper(gpio_num_t pwm_pin, gpio_num_t dir_pin, gpio_num_t enable_pin, 
 
     // Seta as configurações de PWM
     this->set_pwm_duty( PWM_DUTY_PERCENT );
-    this->set_pwm_freq( RPM2PWM(VEL_RPM_MIN) );
+    this->set_pwm_freq( rpm_to_freq(VEL_RPM_MIN) );
+}
+
+Stepper::Stepper(gpio_num_t pwm_pin, gpio_num_t dir_pin, gpio_num_t enable_pin, ledc_channel_t channel, ledc_timer_t timer,
+                 StepperDriverType driver, uint8_t microsteps)
+    : Stepper(pwm_pin, dir_pin, enable_pin, channel, timer,
+              microsteps,
+              // Choose default pulse width per driver
+              (driver == DRIVER_A4988 ? 2.0f : 3.0f))
+{
+    this->_driver = driver;
 }
 
 void Stepper::set_pwm_freq( float freq ) {
@@ -57,11 +68,20 @@ void Stepper::set_pwm_freq( float freq ) {
     this->_last_freq = freq;
 }
 
+float Stepper::rpm_to_freq(float rpm_abs) {
+    // f = rpm/60 * steps_per_rev * microsteps
+    float steps_per_rev = 360.0f / this->_step_deg; // e.g., 200
+    float f = (rpm_abs / 60.0f) * steps_per_rev * (float)this->_microsteps;
+    if (f < MIN_PWM_FREQ) f = MIN_PWM_FREQ;
+    if (f > MAX_PWM_FREQ) f = MAX_PWM_FREQ;
+    return f;
+}
+
 void Stepper::set_pwm_duty( float duty_percent ) {
     // Keep a constant high-time pulse by computing duty = pulse_width / period
     float freq = (this->_last_freq > 1.0f ? this->_last_freq : (float)MIN_PWM_FREQ);
     float period_s = 1.0f / freq;
-    float pulse_s = STEP_PULSE_WIDTH_US * 1e-6f;
+    float pulse_s = this->_pulse_us * 1e-6f;
     // Bound pulse width to 90% of the period and not less than one LSB
     float duty = fminf(0.9f, fmaxf(pulse_s / period_s, 1.0f / (float)(1 << LEDC_RESOLUTION)));
     uint32_t max_duty = (1 << LEDC_RESOLUTION);
@@ -101,7 +121,7 @@ void Stepper::update( float dt_sec ) {
     }
 
     float rpm_abs = fabsf(this->_rpm);
-    this->set_pwm_freq( RPM2PWM(rpm_abs) );
+    this->set_pwm_freq( rpm_to_freq(rpm_abs) );
     // Apply duty to keep pulse width constant at the new frequency
     this->set_pwm_duty( PWM_DUTY_PERCENT );
 }

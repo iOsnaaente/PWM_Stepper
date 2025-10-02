@@ -157,8 +157,12 @@ void setup() {
     debug_display_init();
     DEBUG_SERIAL("OLED", "Display debug inicializado");
 
-    motor_esquerdo = new Stepper( M1_VEL_PIN, M1_DIR_PIN, ENABLE_PIN, LEDC_CHANNEL_0, LEDC_TIMER_0 );
-    motor_direito  = new Stepper( M2_VEL_PIN, M2_DIR_PIN, ENABLE_PIN, LEDC_CHANNEL_1, LEDC_TIMER_0 );
+    // Left motor: A4988 @ 1/16 microstepping
+    motor_esquerdo = new Stepper( M1_VEL_PIN, M1_DIR_PIN, ENABLE_PIN, LEDC_CHANNEL_0, LEDC_TIMER_0,
+                                  Stepper::DRIVER_A4988, 16 );
+    // Right motor: DRV8825 @ 1/32 microstepping
+    motor_direito  = new Stepper( M2_VEL_PIN, M2_DIR_PIN, ENABLE_PIN, LEDC_CHANNEL_1, LEDC_TIMER_0,
+                                  Stepper::DRIVER_DRV8825, 32 );
     robot = new Robot( *motor_esquerdo, *motor_direito );
     robot->stop();
 
