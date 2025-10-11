@@ -18,8 +18,8 @@
 #define VEL_RPM_MIN             10   // 
 
 // Safer PWM frequency bounds for step pulses
-#define MAX_PWM_FREQ 1500
-#define MIN_PWM_FREQ 150 
+#define MAX_PWM_FREQ 3000
+#define MIN_PWM_FREQ 300 
 // ( RPM / Segundo ) x ( 360 / STEP_RESOLUTION ) * MICROSTEPS 
 // DRV8825 @ M0/M1/M2=HIGH => 1/32 microstep. RPM2PWM maps RPM to microstep frequency accordingly.
 // f = rpm/60 * (360/step_deg) * microsteps
