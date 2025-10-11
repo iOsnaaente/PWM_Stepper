@@ -1,12 +1,14 @@
 #include "Stepper/stepper.h"
 
 Stepper::Stepper(gpio_num_t pwm_pin, gpio_num_t dir_pin, gpio_num_t enable_pin, ledc_channel_t channel, ledc_timer_t timer,
-                                 uint8_t microsteps, float pulse_width_us)
+                                 uint8_t microsteps, float pulse_width_us, bool invert_dir)
         : _pwm_pin( pwm_pin ), _dir_pin( dir_pin ), _enb_pin( enable_pin ),
             _pwm_channel( channel ), _timer( timer ),
             _microsteps(microsteps), _step_deg(STEP_RESOLUTION),
-            _rpm_min(VEL_RPM_MIN), _rpm_max(VEL_RPM_MAX), _rpm(0.0f), _target_rpm(0.0f), _accel_rps(ACCEL_RPM_PER_S), _last_freq((MIN_PWM_FREQ+MAX_PWM_FREQ)/2), 
-            _pulse_us(pulse_width_us), _driver(DRIVER_DRV8825), _cw_turn(true), _torque(false)
+            _rpm_min(VEL_RPM_MIN), _rpm_max(VEL_RPM_MAX), _rpm(0.0f), _last_freq((MIN_PWM_FREQ+MAX_PWM_FREQ)/2), 
+            _pulse_us(pulse_width_us), _driver(DRIVER_DRV8825), _cw_turn(true), _torque(false),
+            _current_norm(0.0f), _target_norm(0.0f), _accel_norm(ACCEL_NORM_PER_S), _invert_dir(invert_dir),
+            _last_applied_norm(0.0f), _in_deadzone(true), _last_freq_applied(0.0f)
 {
     // Configura pino de direção
     gpio_config_t dir_cfg = {
@@ -52,11 +54,11 @@ Stepper::Stepper(gpio_num_t pwm_pin, gpio_num_t dir_pin, gpio_num_t enable_pin, 
 }
 
 Stepper::Stepper(gpio_num_t pwm_pin, gpio_num_t dir_pin, gpio_num_t enable_pin, ledc_channel_t channel, ledc_timer_t timer,
-                 StepperDriverType driver, uint8_t microsteps)
+                 StepperDriverType driver, uint8_t microsteps, bool invert_dir)
     : Stepper(pwm_pin, dir_pin, enable_pin, channel, timer,
               microsteps,
               // Choose default pulse width per driver
-              (driver == DRIVER_A4988 ? 2.0f : 3.0f))
+              (driver == DRIVER_A4988 ? 2.0f : 3.0f), invert_dir)
 {
     this->_driver = driver;
 }
@@ -92,38 +94,83 @@ void Stepper::set_pwm_duty( float duty_percent ) {
 
 
 void Stepper::set_velocity( float norm ) {
-    // Apenas define o alvo; a atualização gradual ocorre em update()
-    norm = fminf( fmaxf( norm, -1.0f ), 1.0f );
-    float target_abs = fabsf(norm) * this->_rpm_max;
-    this->_target_rpm = (norm >= 0.0f) ? target_abs : -target_abs;
+    // Set new target; actual applied value moves in update()
+    _target_norm = fminf( fmaxf( norm, -1.0f ), 1.0f );
 }
 
 void Stepper::update( float dt_sec ) {
-    // Aproxima a velocidade atual do alvo respeitando a aceleração
-    float delta = this->_target_rpm - this->_rpm;
-    float max_step = this->_accel_rps * dt_sec;
-    if (fabsf(delta) <= max_step) {
-        this->_rpm = this->_target_rpm;
+    // Hysteresis deadzone entry/exit
+    float tgt_mag = fabsf(_target_norm);
+    if (_in_deadzone) {
+        if (tgt_mag >= NORM_DEADZONE_EXIT) _in_deadzone = false;
     } else {
-        this->_rpm += (delta > 0.0f) ? max_step : -max_step;
+        if (tgt_mag <= NORM_DEADZONE_ENTER) {
+            // Entering deadzone: force true stop and reset ramp memory
+            _in_deadzone = true;
+            _current_norm = 0.0f;
+            _last_applied_norm = 0.0f;
+            this->_rpm = 0.0f;
+            ledc_stop(LEDC_SPEED_MODE, this->_pwm_channel, false);
+            return; // nothing else to do this cycle
+        }
     }
 
-    // Aplica no hardware
-    if (this->_rpm == 0.0f) {
-        ledc_stop( LEDC_SPEED_MODE, this->_pwm_channel, false );
+    // Move current_norm toward target_norm with max delta = accel * dt
+    float max_delta = _accel_norm * dt_sec;
+    float delta = _target_norm - _current_norm;
+    if (fabsf(delta) > max_delta) {
+        _current_norm += (delta > 0 ? max_delta : -max_delta);
+    } else {
+        _current_norm = _target_norm;
+    }
+
+    // Quantize to reduce chattering
+    float applied = _current_norm;
+    if (!_in_deadzone) {
+        float sign = applied >= 0 ? 1.0f : -1.0f;
+        float magq = floorf(fabsf(applied) / NORM_QUANTUM + 0.5f) * NORM_QUANTUM; // round to quantum
+        if (magq > 1.0f) magq = 1.0f;
+        applied = sign * magq;
+    }
+
+    // Zero-cross handling: do not overshoot through zero; approach zero, then change DIR after sign flips
+    static const float eps = 1e-3f;
+    if (_last_applied_norm > eps && _target_norm < -eps) {
+        // We were positive and target is negative -> enforce monotonic decay to zero
+        applied = fmaxf(0.0f, applied);
+    } else if (_last_applied_norm < -eps && _target_norm > eps) {
+        // We were negative and target is positive
+        applied = fminf(0.0f, applied);
+    }
+
+    // Apply to hardware
+    if (fabsf(applied) <= eps) {
+        this->_rpm = 0.0f;
+        ledc_stop(LEDC_SPEED_MODE, this->_pwm_channel, false);
+        _current_norm = 0.0f;
+        _last_applied_norm = 0.0f;
         return;
     }
 
-    bool new_dir = (this->_rpm >= 0.0f);
-    if (new_dir != this->_cw_turn) {
-        this->_cw_turn = new_dir;
-        gpio_set_level( this->_dir_pin, this->_cw_turn ? true : false );
+    bool dir = (applied >= 0.0f);
+    if (_invert_dir) dir = !dir;
+    if (dir != this->_cw_turn) {
+        this->_cw_turn = dir;
+        gpio_set_level(this->_dir_pin, this->_cw_turn ? 1 : 0);
     }
 
-    float rpm_abs = fabsf(this->_rpm);
-    this->set_pwm_freq( rpm_to_freq(rpm_abs) );
-    // Apply duty to keep pulse width constant at the new frequency
-    this->set_pwm_duty( PWM_DUTY_PERCENT );
+    float mag = fabsf(applied);
+    float freq = MIN_PWM_FREQ + (MAX_PWM_FREQ - MIN_PWM_FREQ) * mag;
+    if (fabsf(freq - _last_freq_applied) >= FREQ_APPLY_MIN_DELTA) {
+        this->set_pwm_freq(freq);
+        _last_freq_applied = _last_freq; // set_pwm_freq updates _last_freq to actual
+        // Update derived RPM for external reads
+        float steps_per_rev = 360.0f / this->_step_deg;
+        float rpm_abs = (freq / (steps_per_rev * (float)this->_microsteps)) * 60.0f;
+        this->_rpm = dir ? rpm_abs : -rpm_abs;
+        this->set_pwm_duty(PWM_DUTY_PERCENT);
+    }
+    _last_applied_norm = applied;
 }
 
 void Stepper::set_torque(bool torque ) {

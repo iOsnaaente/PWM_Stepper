@@ -23,6 +23,9 @@ static bool showingOverlay = false;
 static TickType_t overlayDeadline = 0; // tick when overlay should clear
 
 #define OVERLAY_DURATION_MS 5000
+// Throttle redraws to avoid excessive I2C traffic when logs are spammy
+#define MIN_OVERLAY_REDRAW_MS 300
+static TickType_t nextOverlayDrawTick = 0;
 
 static void draw_base() {
     u8g2.clearBuffer();
@@ -104,6 +107,7 @@ void debug_display_init() {
     u8g2.begin();
     draw_base();
     nextToggleTick = xTaskGetTickCount() + pdMS_TO_TICKS(TOGGLE_INTERVAL_MS);
+    nextOverlayDrawTick = xTaskGetTickCount();
     xTaskCreatePinnedToCore(display_task, "DispTask", 2048, NULL, 1, NULL, 0);
 }
 
@@ -113,9 +117,15 @@ void debug_display_push(const char* type, const char* msg) {
         strncpy(lastType, type ? type : "?", sizeof(lastType)-1);
         strncpy(lastMsg, msg ? msg : "", sizeof(lastMsg)-1);
         lastType[sizeof(lastType)-1]=0; lastMsg[sizeof(lastMsg)-1]=0;
+        TickType_t now = xTaskGetTickCount();
+        bool wasShowing = showingOverlay;
         showingOverlay = true;
-        overlayDeadline = xTaskGetTickCount() + pdMS_TO_TICKS(OVERLAY_DURATION_MS);
-        draw_overlay();
+        overlayDeadline = now + pdMS_TO_TICKS(OVERLAY_DURATION_MS);
+        // Redraw only if we weren't showing or we've passed the throttle window
+        if (!wasShowing || (int32_t)(now - nextOverlayDrawTick) >= 0) {
+            draw_overlay();
+            nextOverlayDrawTick = now + pdMS_TO_TICKS(MIN_OVERLAY_REDRAW_MS);
+        }
         xSemaphoreGive(dispMutex);
     }
 }

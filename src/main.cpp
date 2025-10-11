@@ -37,10 +37,10 @@
 
 Stepper *motor_esquerdo;
 Stepper *motor_direito;
+void motor_update_Task(void *pvParameters);
 Robot   *robot;
 
 void udp_listener_Task(void *pvParameters);
-void motor_update_Task(void *pvParameters);
 
 WiFiUDP Udp;
 static EventGroupHandle_t wifi_event_group;
@@ -157,12 +157,11 @@ void setup() {
     debug_display_init();
     DEBUG_SERIAL("OLED", "Display debug inicializado");
 
-    // Left motor: A4988 @ 1/16 microstepping
-    motor_esquerdo = new Stepper( M1_VEL_PIN, M1_DIR_PIN, ENABLE_PIN, LEDC_CHANNEL_0, LEDC_TIMER_0,
-                                  Stepper::DRIVER_A4988, 16 );
+    // Left motor: A4988 @ 1/32 microstepping
+        // Use separate LEDC timers so each wheel can run its own step frequency
+    motor_esquerdo = new Stepper( M1_VEL_PIN, M1_DIR_PIN, ENABLE_PIN, LEDC_CHANNEL_0, LEDC_TIMER_0,Stepper::DRIVER_DRV8825, 32, false );
     // Right motor: DRV8825 @ 1/32 microstepping
-    motor_direito  = new Stepper( M2_VEL_PIN, M2_DIR_PIN, ENABLE_PIN, LEDC_CHANNEL_1, LEDC_TIMER_0,
-                                  Stepper::DRIVER_DRV8825, 32 );
+    motor_direito  = new Stepper( M2_VEL_PIN, M2_DIR_PIN, ENABLE_PIN, LEDC_CHANNEL_1, LEDC_TIMER_1,Stepper::DRIVER_DRV8825, 32, true );
     robot = new Robot( *motor_esquerdo, *motor_direito );
     robot->stop();
 
@@ -198,6 +197,7 @@ void setup() {
     }
 
     xTaskCreatePinnedToCore(udp_listener_Task, "UDPControl", 8192, NULL, 1, NULL, 0);
+    // Ramping update task (100 Hz)
     xTaskCreatePinnedToCore(motor_update_Task, "MotorUpdate", 4096, NULL, 1, NULL, 1);
 }
 
@@ -258,7 +258,7 @@ void udp_listener_Task(void *pvParameters) {
 }
 
 void motor_update_Task(void *pvParameters) {
-    const TickType_t period = pdMS_TO_TICKS(10); // 100 Hz update
+    const TickType_t period = pdMS_TO_TICKS(10);
     TickType_t last = xTaskGetTickCount();
     for(;;) {
         motor_esquerdo->update(0.010f);

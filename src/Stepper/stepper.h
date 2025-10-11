@@ -14,13 +14,12 @@
 #define MICRO_STEP_RESOLUTION   32   // default microstep (can be overridden per motor)
 #define STEP_RESOLUTION         1.8  // graus por passo
 #define PWM_DUTY_PERCENT        10   // Legacy; not used for step width anymore
-#define VEL_RPM_MAX             250  // revert to original max
+#define VEL_RPM_MAX             25   // 10% of previous max (was 250)
 #define VEL_RPM_MIN             10   // 
 
 // Safer PWM frequency bounds for step pulses
-#define MAX_PWM_FREQ 12000
-#define MIN_PWM_FREQ 1500 
-
+#define MAX_PWM_FREQ 1500
+#define MIN_PWM_FREQ 150 
 // ( RPM / Segundo ) x ( 360 / STEP_RESOLUTION ) * MICROSTEPS 
 // DRV8825 @ M0/M1/M2=HIGH => 1/32 microstep. RPM2PWM maps RPM to microstep frequency accordingly.
 // f = rpm/60 * (360/step_deg) * microsteps
@@ -29,14 +28,32 @@
 // Legacy RPM->frequency macro kept for reference; implementation now per-instance
 #define RPM2PWM(rpm) (uint32_t)fmaxf(fminf(((rpm) / 60.0f) * (360.0f / STEP_RESOLUTION) * MICRO_STEP_RESOLUTION, MAX_PWM_FREQ), MIN_PWM_FREQ)
 
-// Default acceleration in RPM per second (can be overridden via build_flags: -DACCEL_RPM_PER_S=600)
-#ifndef ACCEL_RPM_PER_S
-#define ACCEL_RPM_PER_S       400.0f
+// Simple ramp in normalized units per second (|norm| in [0,1])
+#ifndef ACCEL_NORM_PER_S
+#define ACCEL_NORM_PER_S        1.5f
+#endif
+
+// Deadzone with hysteresis around zero to avoid flicker
+#ifndef NORM_DEADZONE_ENTER
+#define NORM_DEADZONE_ENTER     0.06f   // enter deadzone if |norm| <= 0.06
+#endif
+#ifndef NORM_DEADZONE_EXIT
+#define NORM_DEADZONE_EXIT      0.08f   // exit deadzone only when |norm| >= 0.08 (hysteresis)
+#endif
+
+// Quantize normalized command to reduce update frequency near setpoint
+#ifndef NORM_QUANTUM
+#define NORM_QUANTUM            0.02f   // steps of 0.02 in magnitude
+#endif
+
+// Only apply new frequency if change is significant
+#ifndef FREQ_APPLY_MIN_DELTA
+#define FREQ_APPLY_MIN_DELTA    20.0f   // Hz
 #endif
 
 // Fixed STEP pulse high-time in microseconds for the driver (e.g., DRV8825 >=1.9us)
 #ifndef STEP_PULSE_WIDTH_US
-#define STEP_PULSE_WIDTH_US    3.0f
+#define STEP_PULSE_WIDTH_US    2.5f
 #endif
 
 class Stepper {
@@ -54,11 +71,18 @@ private:
     float _rpm_min;
     float _rpm_max;
     float _rpm;          // current RPM (signed)
-    float _target_rpm;   // target RPM (signed)
-    float _accel_rps;    // acceleration in RPM/s
     float _last_freq;    // track last set frequency for safe duty calculation
     float _pulse_us;     // high-time pulse width in microseconds for STEP
     StepperDriverType _driver;
+
+    // Ramping and direction inversion
+    float _current_norm; // applied normalized command [-1,1]
+    float _target_norm;  // target normalized command [-1,1]
+    float _accel_norm;   // accel in norm/s
+    bool  _invert_dir;   // invert physical direction if needed
+    float _last_applied_norm; // previous applied value for zero-cross logic
+    bool  _in_deadzone;  // current deadzone state
+    float _last_freq_applied; // last frequency we pushed to hardware
 
     bool _cw_turn;
     bool _torque;
@@ -69,15 +93,15 @@ private:
 
 public:
     Stepper( gpio_num_t pwm_pin, gpio_num_t dir_pin, gpio_num_t enable_pin, ledc_channel_t channel, ledc_timer_t timer,
-             uint8_t microsteps = MICRO_STEP_RESOLUTION, float pulse_width_us = STEP_PULSE_WIDTH_US );
+             uint8_t microsteps = MICRO_STEP_RESOLUTION, float pulse_width_us = STEP_PULSE_WIDTH_US, bool invert_dir = false );
 
     // Overload: pass driver type + microsteps (pulse width is chosen accordingly)
     Stepper( gpio_num_t pwm_pin, gpio_num_t dir_pin, gpio_num_t enable_pin, ledc_channel_t channel, ledc_timer_t timer,
-             StepperDriverType driver, uint8_t microsteps );
+             StepperDriverType driver, uint8_t microsteps, bool invert_dir = false );
 
-    // Set desired velocity as normalized command in [-1, 1]
+    // Set desired velocity target as normalized command in [-1, 1]
     void set_velocity( float norm );
-    // Update the motor speed toward target using acceleration ramp
+    // Update towards target with simple ramp and safe zero-cross logic
     void update( float dt_sec );
     // Immediate torque control (active low enable)
     void set_torque( bool torque ); 
