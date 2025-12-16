@@ -77,19 +77,23 @@
 
 #define LED_BOARD           ((gpio_num_t)GPIO_NUM_2)
 
-#define M1_DIR_PIN        ((gpio_num_t)(GPIO_NUM_17))
-#define M1_VEL_PIN        ((gpio_num_t)(GPIO_NUM_16))
+// --- Motores (ESP32-C3 Super Mini + A4988) ---
+// Motor 1: STEP1 -> GPIO0, DIR1 -> GPIO4
+#define M1_DIR_PIN        ((gpio_num_t)(GPIO_NUM_4))
+#define M1_VEL_PIN        ((gpio_num_t)(GPIO_NUM_0))
 
-#define M2_DIR_PIN        ((gpio_num_t)(GPIO_NUM_4))
-#define M2_VEL_PIN        ((gpio_num_t)(GPIO_NUM_5))
+// Motor 2: STEP2 -> GPIO1, DIR2 -> GPIO5
+#define M2_DIR_PIN        ((gpio_num_t)(GPIO_NUM_5))
+#define M2_VEL_PIN        ((gpio_num_t)(GPIO_NUM_1))
 
-#define ENABLE_PIN        ((gpio_num_t)(GPIO_NUM_18)) // Updated per hardware: DRV8825 nENBL on GPIO18
+// Enable compartilhado para ambos A4988
+#define ENABLE_PIN        ((gpio_num_t)(GPIO_NUM_10))
 
 // ---------------------------------------------------------------------------
-// OLED 0.91" I2C Display (SSD1306 típico)
-// SCL = GPIO21, SDA = GPIO3 (ATENÇÃO: GPIO3 é RX0 da serial USB. Pode haver conflito)
-#define OLED_SCL_PIN      ((gpio_num_t)(GPIO_NUM_21))
-#define OLED_SDA_PIN      ((gpio_num_t)(GPIO_NUM_3))
+// OLED 0.91" I2C Display (SSD1306)
+// ESP32-C3 Super Mini: SDA = GPIO8, SCL = GPIO9
+#define OLED_SCL_PIN      ((gpio_num_t)(GPIO_NUM_9))
+#define OLED_SDA_PIN      ((gpio_num_t)(GPIO_NUM_8))
 
 
 

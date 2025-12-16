@@ -53,10 +53,14 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
                 esp_wifi_connect();
                 break;
             case WIFI_EVENT_STA_DISCONNECTED:
+            {
+                // Log detailed disconnect reason to help diagnose issues on ESP32-C3
+                wifi_event_sta_disconnected_t *disc = (wifi_event_sta_disconnected_t*)event_data;
+                DEBUG_SERIAL("WIFI", "Disconnected, retrying (reason=%d)", (int)disc->reason);
                 esp_wifi_connect();
                 xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
-                DEBUG_SERIAL("WIFI", "Disconnected, retrying...");
                 break;
+            }
         }
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
     ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
@@ -157,11 +161,11 @@ void setup() {
     debug_display_init();
     DEBUG_SERIAL("OLED", "Display debug inicializado");
 
-    // Left motor: A4988 @ 1/32 microstepping
-        // Use separate LEDC timers so each wheel can run its own step frequency
-    motor_esquerdo = new Stepper( M1_VEL_PIN, M1_DIR_PIN, ENABLE_PIN, LEDC_CHANNEL_0, LEDC_TIMER_0,Stepper::DRIVER_DRV8825, 32, false );
-    // Right motor: DRV8825 @ 1/32 microstepping
-    motor_direito  = new Stepper( M2_VEL_PIN, M2_DIR_PIN, ENABLE_PIN, LEDC_CHANNEL_1, LEDC_TIMER_1,Stepper::DRIVER_DRV8825, 32, true );
+        // Left motor: A4988 @ 1/16 microstepping
+		// Use separate LEDC timers so each wheel can run its own step frequency
+        motor_esquerdo = new Stepper( M1_VEL_PIN, M1_DIR_PIN, ENABLE_PIN, LEDC_CHANNEL_0, LEDC_TIMER_0, Stepper::DRIVER_A4988, 16, false );
+        // Right motor: A4988 @ 1/16 microstepping (inverted to match physical mounting)
+        motor_direito  = new Stepper( M2_VEL_PIN, M2_DIR_PIN, ENABLE_PIN, LEDC_CHANNEL_1, LEDC_TIMER_1, Stepper::DRIVER_A4988, 16, true );
     robot = new Robot( *motor_esquerdo, *motor_direito );
     robot->stop();
 
