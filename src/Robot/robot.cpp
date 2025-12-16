@@ -2,8 +2,7 @@
 
 Robot::Robot( Stepper& left_motor, Stepper& right_motor )
     : _left_motor(left_motor), _right_motor(right_motor) {
-    _left_motor.set_torque(true);
-    _right_motor.set_torque(true);
+    // Start with drivers disabled; torque is enabled later on demand
 }
 
 

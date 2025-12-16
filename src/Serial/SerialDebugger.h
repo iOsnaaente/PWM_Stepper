@@ -24,8 +24,8 @@ extern SemaphoreHandle_t serialDebuggerMutex;
     if (xSemaphoreTake(serialDebuggerMutex, ( TickType_t ) pdMS_TO_TICKS(5) ) == pdTRUE) {                                    \
       char msg_buff[255];                                                                                                     \
       snprintf( msg_buff, sizeof(msg_buff), FORMAT, ##__VA_ARGS__ );                                                          \
-      String log_message = "[" + String( TIPO) + "] " + String(__FILE__) + " [" + String(__LINE__) + "]: " + MESSAGE + "\n";  \
-      uart_write_bytes(USB_UART_NUM, log_message.c_str(), strlen(log_message.c_str()));                                       \
+      String log_message = "[" + String( TIPO) + "] " + String(__FILE__) + " [" + String(__LINE__) + "]: " + String(msg_buff) + "\n";  \
+      USB_BUS.print(log_message);                                                                                             \
       xSemaphoreGive(serialDebuggerMutex);                                                                                    \
     }
 #endif
@@ -36,14 +36,15 @@ extern SemaphoreHandle_t serialDebuggerMutex;
       char msg_buff[256];                                                               \
       snprintf( msg_buff, sizeof(msg_buff), FORMAT, ##__VA_ARGS__ );                    \
       String log_message = "[" + String(TIPO) + "]: " + String(msg_buff) + "\r\n";      \
-      uart_write_bytes(UART_NUM_0, log_message.c_str(), strlen(log_message.c_str()));   \
+      USB_BUS.print(log_message);                                                       \
       debug_display_push(TIPO, msg_buff);                                               \
       xSemaphoreGive(serialDebuggerMutex);                                              \
     }
 #endif 
 
 #ifdef DEBUG_SERIAL_DESLIGADO
-  #define DEBUG_SERIAL( TIPO, MESSAGE ) {};
+  // Accept the same arguments as the active macros but do nothing
+  #define DEBUG_SERIAL( TIPO, FORMAT, ... ) do { } while(0)
 #endif 
 
 /**

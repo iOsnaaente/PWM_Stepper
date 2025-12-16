@@ -13,9 +13,9 @@ SemaphoreHandle_t serialDebuggerMutex;
 void serial_debugger_init( void ) {
   /* Inicia o mutex para controle do DEBUG_SERIAL */ 
   serialDebuggerMutex = xSemaphoreCreateMutex();
-  /* UART para o USB Serial usado para debug */
-  USB_BUS.begin(USB_BUS_BAUDRATE, SERIAL_8N1, USB_RXD0_PIN, USB_TXD0_PIN );
-  DEBUG_SERIAL("DEBUG UART", "Iniciado a comunicação UART através de Serial0 [Pinos TXD0/RXD0].");
+  /* Inicializa a UART conectada ao conversor USB-Serial da placa */
+  USB_BUS.begin(USB_BUS_BAUDRATE, SERIAL_8N1, USB_RXD0_PIN, USB_TXD0_PIN);
+  DEBUG_SERIAL("DEBUG UART", "UART debug iniciada em %d bps (RX=%d, TX=%d).", USB_BUS_BAUDRATE, (int)USB_RXD0_PIN, (int)USB_TXD0_PIN);
 }
 
 String buffer2String(const uint8_t* buffer, size_t length) {

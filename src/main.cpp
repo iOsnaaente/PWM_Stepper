@@ -17,7 +17,6 @@
 
 #include <WiFi.h>
 #include <WiFiUdp.h>
-#include <lwip/inet.h>
 #include <U8g2lib.h>
 #include <Wire.h>
 #include "Display/debug_display.h"
@@ -43,40 +42,6 @@ Robot   *robot;
 void udp_listener_Task(void *pvParameters);
 
 WiFiUDP Udp;
-static EventGroupHandle_t wifi_event_group;
-static const int WIFI_CONNECTED_BIT = BIT0;
-
-static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
-    if (event_base == WIFI_EVENT) {
-        switch(event_id) {
-            case WIFI_EVENT_STA_START:
-                esp_wifi_connect();
-                break;
-            case WIFI_EVENT_STA_DISCONNECTED:
-            {
-                // Log detailed disconnect reason to help diagnose issues on ESP32-C3
-                wifi_event_sta_disconnected_t *disc = (wifi_event_sta_disconnected_t*)event_data;
-                DEBUG_SERIAL("WIFI", "Disconnected, retrying (reason=%d)", (int)disc->reason);
-                esp_wifi_connect();
-                xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
-                break;
-            }
-        }
-    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-    ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-    uint32_t ip_raw = event->ip_info.ip.addr; // Little-endian
-    uint8_t b1 = ip_raw & 0xFF;
-    uint8_t b2 = (ip_raw >> 8) & 0xFF;
-    uint8_t b3 = (ip_raw >> 16) & 0xFF;
-    uint8_t b4 = (ip_raw >> 24) & 0xFF;
-    DEBUG_SERIAL("WIFI", "Got IP: %u.%u.%u.%u", b1, b2, b3, b4);
-        xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
-        DEBUG_SERIAL("WIFI", "Connection success to SSID: %s", WIFI_SSID);
-        char ipbuf[24];
-        snprintf(ipbuf, sizeof(ipbuf), "%u.%u.%u.%u", b1, b2, b3, b4);
-        debug_display_set_ip(ipbuf);
-    }
-}
 
 // ----------------------------------------------------------------------------------
 // Control packet parsing for analog commands from an Xbox controller (or similar)
@@ -88,9 +53,10 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
 // 3) Legacy single-letter fallback (F,B,L,R, any other = stop)
 // A watchdog stops the robot if no valid command arrives within COMMAND_TIMEOUT_MS.
 
-static const uint32_t COMMAND_TIMEOUT_MS = 500; // auto-stop timeout
-static TickType_t last_command_tick = 0;         // last time a valid command was applied
-static const float   CMD_DEADZONE       = 0.05f; // treat small magnitudes as zero
+static const uint32_t COMMAND_TIMEOUT_MS   = 500;  // auto-stop timeout
+static TickType_t     last_command_tick    = 0;    // last time a valid command was applied
+static const float    CMD_DEADZONE         = 0.05f; // treat small magnitudes as zero
+static const uint32_t WIFI_START_DELAY_MS  = 3000; // delay before bringing up WiFi (ms)
 
 static inline float clamp_unit(float v) { return fminf(fmaxf(v, -1.0f), 1.0f); }
 
@@ -151,9 +117,24 @@ static bool decode_control_packet(uint8_t* data, int len, float& left, float& ri
     return parse_legacy_single(data, len, left, right);
 }
 
-#ifndef MOTOR_SELF_TEST
+// Shared watchdog: stop motors and disable torque if no command within timeout
+static void control_watchdog_step() {
+    if (last_command_tick != 0) {
+        TickType_t now = xTaskGetTickCount();
+        if ( (now - last_command_tick) * portTICK_PERIOD_MS > COMMAND_TIMEOUT_MS ) {
+            robot->drive_wheels(0.0f, 0.0f);
+            // To reduce heat, disable torque when idle
+            robot->set_torque(false);
+            last_command_tick = 0; // prevent re-entering until new cmd
+            DEBUG_SERIAL("CTRL", "Timeout stop");
+        }
+    }
+}
+
+#if !defined(MOTOR_SELF_TEST) && !defined(USE_ESPNOW_CONTROL)
 void setup() {
     serial_debugger_init();
+    DEBUG_SERIAL("RESET", "Reset reason: %d", (int)esp_reset_reason());
     DEBUG_SERIAL("SERIAL INIT", "Serial de  debug inicializado.");
     DEBUG_SERIAL("SERIAL INIT", "Baudrate: %d", USB_BUS_BAUDRATE);
 
@@ -161,36 +142,35 @@ void setup() {
     debug_display_init();
     DEBUG_SERIAL("OLED", "Display debug inicializado");
 
-        // Left motor: A4988 @ 1/16 microstepping
-		// Use separate LEDC timers so each wheel can run its own step frequency
-        motor_esquerdo = new Stepper( M1_VEL_PIN, M1_DIR_PIN, ENABLE_PIN, LEDC_CHANNEL_0, LEDC_TIMER_0, Stepper::DRIVER_A4988, 16, false );
-        // Right motor: A4988 @ 1/16 microstepping (inverted to match physical mounting)
-        motor_direito  = new Stepper( M2_VEL_PIN, M2_DIR_PIN, ENABLE_PIN, LEDC_CHANNEL_1, LEDC_TIMER_1, Stepper::DRIVER_A4988, 16, true );
+        // Left motor: A4988 in full-step mode (1 microstep)
+        // Use separate LEDC timers so each wheel can run its own step frequency
+        motor_esquerdo = new Stepper( M1_VEL_PIN, M1_DIR_PIN, ENABLE_PIN, LEDC_CHANNEL_0, LEDC_TIMER_0, Stepper::DRIVER_A4988, 1, false );
+        // Right motor: A4988 in full-step mode (inverted to match physical mounting)
+        motor_direito  = new Stepper( M2_VEL_PIN, M2_DIR_PIN, ENABLE_PIN, LEDC_CHANNEL_1, LEDC_TIMER_1, Stepper::DRIVER_A4988, 1, true );
     robot = new Robot( *motor_esquerdo, *motor_direito );
     robot->stop();
 
-    // ---- WiFi Initialization ----
-    wifi_event_group = xEventGroupCreate();
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, NULL));
+    // Pequeno atraso antes de iniciar o WiFi para reduzir pico de corrente na partida
+    DEBUG_SERIAL("POWER", "Aguardando %lu ms antes de iniciar WiFi", (unsigned long)WIFI_START_DELAY_MS);
+    delay(WIFI_START_DELAY_MS);
 
-    wifi_config_t wifi_config = {};
-    strncpy((char*)wifi_config.sta.ssid, WIFI_SSID, sizeof(wifi_config.sta.ssid));
-    strncpy((char*)wifi_config.sta.password, WIFI_PASSWORD, sizeof(wifi_config.sta.password));
-    wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
-    wifi_config.sta.pmf_cfg.required = false;
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    // ---- WiFi Initialization (simplified Arduino flow) ----
     DEBUG_SERIAL("WIFI", "Connecting to SSID: %s", WIFI_SSID);
+    WiFi.mode(WIFI_STA);
+    // Reduce WiFi TX power to lower current spikes on weak supplies
+    WiFi.setTxPower(WIFI_POWER_8_5dBm);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
-    EventBits_t bits = xEventGroupWaitBits(wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, pdMS_TO_TICKS(10000));
-    if (!(bits & WIFI_CONNECTED_BIT)) {
+    uint32_t startMs = millis();
+    while (WiFi.status() != WL_CONNECTED && (millis() - startMs) < 10000UL) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+        IPAddress ip = WiFi.localIP();
+        DEBUG_SERIAL("WIFI", "Connected. IP: %s", ip.toString().c_str());
+        debug_display_set_ip(ip.toString().c_str());
+    } else {
         DEBUG_SERIAL("WIFI", "Failed to connect within timeout, continuing anyway");
     }
 
@@ -200,9 +180,10 @@ void setup() {
         DEBUG_SERIAL("UDP", "Failed to start UDP on port %d", UDP_LISTEN_PORT);
     }
 
-    xTaskCreatePinnedToCore(udp_listener_Task, "UDPControl", 8192, NULL, 1, NULL, 0);
+    // On ESP32-C3 there is only one core; use normal task creation
+    xTaskCreate(udp_listener_Task, "UDPControl", 8192, NULL, 1, NULL);
     // Ramping update task (100 Hz)
-    xTaskCreatePinnedToCore(motor_update_Task, "MotorUpdate", 4096, NULL, 1, NULL, 1);
+    xTaskCreate(motor_update_Task, "MotorUpdate", 4096, NULL, 1, NULL);
 }
 
 void udp_listener_Task(void *pvParameters) {
@@ -246,17 +227,7 @@ void udp_listener_Task(void *pvParameters) {
                 }
             }
         }
-        // Watchdog timeout -> stop motors
-        if (last_command_tick != 0) {
-            TickType_t now = xTaskGetTickCount();
-            if ( (now - last_command_tick) * portTICK_PERIOD_MS > COMMAND_TIMEOUT_MS ) {
-                robot->drive_wheels(0.0f, 0.0f);
-                // To reduce heat, disable torque when idle
-                robot->set_torque(false);
-                last_command_tick = 0; // prevent re-entering until new cmd
-                DEBUG_SERIAL("CTRL", "Timeout stop");
-            }
-        }
+        control_watchdog_step();
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
@@ -267,6 +238,7 @@ void motor_update_Task(void *pvParameters) {
     for(;;) {
         motor_esquerdo->update(0.010f);
         motor_direito->update(0.010f);
+        control_watchdog_step();
         vTaskDelayUntil(&last, period);
     }
 }
@@ -281,4 +253,4 @@ void loop() {
     // DEBUG_SERIAL("RAM", "Maior bloco livre: %u KB", largest / 1024); // (Comentado conforme solicitado)
     vTaskDelete(NULL);
 }
-#endif // MOTOR_SELF_TEST
+#endif // !MOTOR_SELF_TEST && !USE_ESPNOW_CONTROL

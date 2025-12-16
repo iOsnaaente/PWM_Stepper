@@ -46,11 +46,8 @@ Stepper::Stepper(gpio_num_t pwm_pin, gpio_num_t dir_pin, gpio_num_t enable_pin, 
     gpio_set_level( this->_dir_pin, this->_cw_turn );
 
     // Seta o Torque dos motores 
-    gpio_set_level( this->_enb_pin, this->_torque );
-
-    // Seta as configurações de PWM
-    this->set_pwm_duty( PWM_DUTY_PERCENT );
-    this->set_pwm_freq( rpm_to_freq(VEL_RPM_MIN) );
+    // Active-low enable: LOW = enabled, HIGH = disabled
+    gpio_set_level( this->_enb_pin, this->_torque ? 0 : 1 );
 }
 
 Stepper::Stepper(gpio_num_t pwm_pin, gpio_num_t dir_pin, gpio_num_t enable_pin, ledc_channel_t channel, ledc_timer_t timer,
@@ -80,75 +77,32 @@ float Stepper::rpm_to_freq(float rpm_abs) {
 }
 
 void Stepper::set_pwm_duty( float duty_percent ) {
-    // Keep a constant high-time pulse by computing duty = pulse_width / period
-    float freq = (this->_last_freq > 1.0f ? this->_last_freq : (float)MIN_PWM_FREQ);
-    float period_s = 1.0f / freq;
-    float pulse_s = this->_pulse_us * 1e-6f;
-    // Bound pulse width to 90% of the period and not less than one LSB
-    float duty = fminf(0.9f, fmaxf(pulse_s / period_s, 1.0f / (float)(1 << LEDC_RESOLUTION)));
+    (void)duty_percent;
+    // Known-good behavior for A4988-style STEP input: use a 50% duty square wave.
+    // This produces wide pulses (like the user's reference sketch) and avoids extremely narrow highs.
     uint32_t max_duty = (1 << LEDC_RESOLUTION);
-    uint32_t duty_val = (uint32_t)(duty * max_duty);
+    uint32_t duty_val = max_duty / 2;
     ledc_set_duty( LEDC_SPEED_MODE, this->_pwm_channel, duty_val );
     ledc_update_duty(LEDC_SPEED_MODE, this->_pwm_channel);
 }
 
 
 void Stepper::set_velocity( float norm ) {
-    // Set new target; actual applied value moves in update()
-    _target_norm = fminf( fmaxf( norm, -1.0f ), 1.0f );
+    // Simple direct command: clamp and store as current command
+    _current_norm = fminf( fmaxf( norm, -1.0f ), 1.0f );
 }
 
 void Stepper::update( float dt_sec ) {
-    // Hysteresis deadzone entry/exit
-    float tgt_mag = fabsf(_target_norm);
-    if (_in_deadzone) {
-        if (tgt_mag >= NORM_DEADZONE_EXIT) _in_deadzone = false;
-    } else {
-        if (tgt_mag <= NORM_DEADZONE_ENTER) {
-            // Entering deadzone: force true stop and reset ramp memory
-            _in_deadzone = true;
-            _current_norm = 0.0f;
-            _last_applied_norm = 0.0f;
-            this->_rpm = 0.0f;
-            ledc_stop(LEDC_SPEED_MODE, this->_pwm_channel, false);
-            return; // nothing else to do this cycle
-        }
-    }
+    (void)dt_sec;
 
-    // Move current_norm toward target_norm with max delta = accel * dt
-    float max_delta = _accel_norm * dt_sec;
-    float delta = _target_norm - _current_norm;
-    if (fabsf(delta) > max_delta) {
-        _current_norm += (delta > 0 ? max_delta : -max_delta);
-    } else {
-        _current_norm = _target_norm;
-    }
-
-    // Quantize to reduce chattering
+    // Direct mapping: use the current normalized command as-is
     float applied = _current_norm;
-    if (!_in_deadzone) {
-        float sign = applied >= 0 ? 1.0f : -1.0f;
-        float magq = floorf(fabsf(applied) / NORM_QUANTUM + 0.5f) * NORM_QUANTUM; // round to quantum
-        if (magq > 1.0f) magq = 1.0f;
-        applied = sign * magq;
-    }
 
-    // Zero-cross handling: do not overshoot through zero; approach zero, then change DIR after sign flips
+    // Small epsilon deadzone to fully stop when near zero
     static const float eps = 1e-3f;
-    if (_last_applied_norm > eps && _target_norm < -eps) {
-        // We were positive and target is negative -> enforce monotonic decay to zero
-        applied = fmaxf(0.0f, applied);
-    } else if (_last_applied_norm < -eps && _target_norm > eps) {
-        // We were negative and target is positive
-        applied = fminf(0.0f, applied);
-    }
-
-    // Apply to hardware
     if (fabsf(applied) <= eps) {
         this->_rpm = 0.0f;
         ledc_stop(LEDC_SPEED_MODE, this->_pwm_channel, false);
-        _current_norm = 0.0f;
-        _last_applied_norm = 0.0f;
         return;
     }
 
@@ -160,17 +114,14 @@ void Stepper::update( float dt_sec ) {
     }
 
     float mag = fabsf(applied);
-    float freq = MIN_PWM_FREQ + (MAX_PWM_FREQ - MIN_PWM_FREQ) * mag;
-    if (fabsf(freq - _last_freq_applied) >= FREQ_APPLY_MIN_DELTA) {
-        this->set_pwm_freq(freq);
-        _last_freq_applied = _last_freq; // set_pwm_freq updates _last_freq to actual
-        // Update derived RPM for external reads
-        float steps_per_rev = 360.0f / this->_step_deg;
-        float rpm_abs = (freq / (steps_per_rev * (float)this->_microsteps)) * 60.0f;
-        this->_rpm = dir ? rpm_abs : -rpm_abs;
-        this->set_pwm_duty(PWM_DUTY_PERCENT);
-    }
-    _last_applied_norm = applied;
+    // Map normalized magnitude [0,1] into a much lower, configured RPM band
+    float rpm_abs = _rpm_min + (_rpm_max - _rpm_min) * mag; // e.g., 10..25 RPM
+    float freq = rpm_to_freq(rpm_abs);
+
+    // Apply frequency and update reported RPM
+    this->set_pwm_freq(freq);
+    this->_rpm = dir ? rpm_abs : -rpm_abs;
+    this->set_pwm_duty(PWM_DUTY_PERCENT);
 }
 
 void Stepper::set_torque(bool torque ) {

@@ -72,10 +72,12 @@
 #define USB_BUS_NUM         UART_NUM_0 
 #define USB_BUS_BAUDRATE    115200
 #define USB_BUFF_SIZE       1024
-#define USB_RXD0_PIN        ((gpio_num_t)(GPIO_NUM_3))
-#define USB_TXD0_PIN        ((gpio_num_t)(GPIO_NUM_1))
+// ESP32-C3 Super Mini: USB-UART bridge on GPIO20 (RX) and GPIO21 (TX)
+#define USB_RXD0_PIN        ((gpio_num_t)(GPIO_NUM_20))
+#define USB_TXD0_PIN        ((gpio_num_t)(GPIO_NUM_21))
 
-#define LED_BOARD           ((gpio_num_t)GPIO_NUM_2)
+// On ESP32-C3 Super Mini the on-board LED is on GPIO8
+#define LED_BOARD           ((gpio_num_t)GPIO_NUM_8)
 
 // --- Motores (ESP32-C3 Super Mini + A4988) ---
 // Motor 1: STEP1 -> GPIO0, DIR1 -> GPIO4
