@@ -1,5 +1,6 @@
-# Ignore user-specific credentials (copy the template instead)
+## Local credentials (never commit)
 include/credentials.h
+
 
 # PlatformIO build artifacts (if not already ignored globally)
 .pio/
@@ -11,7 +12,6 @@ test
 
 # Credenciais HTTPS 
 /src/Web/certs/*
-credentials.h 
 
 .vscode
 .vscode/.browse.c_cpp.db*

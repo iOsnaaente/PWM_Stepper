@@ -1,0 +1,20 @@
+#pragma once
+
+// -----------------------------------------------------------------------------
+// Copy this file to `include/credentials.h` and fill in your local credentials.
+// The `include/credentials.h` file is ignored by git.
+// -----------------------------------------------------------------------------
+
+// WiFi credentials
+#define WIFI_SSID     "QironRobotics"
+#define WIFI_PASSWORD "B30_n4_&$col@"
+
+// UDP control settings
+// - UDP_LISTEN_PORT: local port the robot listens on for control packets
+// - UDP_ALLOWED_REMOTE_IP: set to "0.0.0.0" to accept from any IP,
+//   or set to a specific IP (e.g. "192.168.1.50") to restrict.
+#define UDP_LISTEN_PORT       4210
+#define UDP_ALLOWED_REMOTE_IP "0.0.0.0"
+
+// Max UDP packet size for control packets
+#define UDP_MAX_PACKET_SIZE 64
