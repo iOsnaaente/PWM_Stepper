@@ -131,7 +131,7 @@ static void control_watchdog_step() {
     }
 }
 
-#if !defined(MOTOR_SELF_TEST) && !defined(USE_ESPNOW_CONTROL)
+#if !defined(MOTOR_SELF_TEST) && !defined(USE_ESPNOW_CONTROL) && !defined(GY521_SELF_TEST)
 void setup() {
     serial_debugger_init();
     DEBUG_SERIAL("RESET", "Reset reason: %d", (int)esp_reset_reason());

@@ -14,7 +14,7 @@
 #define MICRO_STEP_RESOLUTION   1    // default microstep (full-step; can be overridden per motor)
 #define STEP_RESOLUTION         1.8  // graus por passo
 #define PWM_DUTY_PERCENT        10   // Legacy; not used for step width anymore
-#define VEL_RPM_MAX             200 // desired max speed in RPM (full-step)
+#define VEL_RPM_MAX             600 // desired max speed in RPM (full-step)
 #define VEL_RPM_MIN             20   // minimum useful RPM
 
 // Safer PWM frequency bounds for step pulses
