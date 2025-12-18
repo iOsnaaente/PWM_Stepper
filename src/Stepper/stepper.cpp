@@ -88,14 +88,27 @@ void Stepper::set_pwm_duty( float duty_percent ) {
 
 
 void Stepper::set_velocity( float norm ) {
-    // Simple direct command: clamp and store as current command
-    _current_norm = fminf( fmaxf( norm, -1.0f ), 1.0f );
+    // Store target command; update() will ramp _current_norm toward this
+    _target_norm = fminf( fmaxf( norm, -1.0f ), 1.0f );
 }
 
 void Stepper::update( float dt_sec ) {
-    (void)dt_sec;
+    if (dt_sec <= 0.0f) {
+        dt_sec = 0.0f;
+    }
 
-    // Direct mapping: use the current normalized command as-is
+    // Apply acceleration-limited ramp from _current_norm toward _target_norm
+    if (dt_sec > 0.0f && _accel_norm > 0.0f) {
+        float maxStep = _accel_norm * dt_sec;
+        float delta   = _target_norm - _current_norm;
+        if (delta > maxStep)       delta = maxStep;
+        else if (delta < -maxStep) delta = -maxStep;
+        _current_norm += delta;
+    } else {
+        // No valid dt or accel -> jump directly (should be rare)
+        _current_norm = _target_norm;
+    }
+
     float applied = _current_norm;
 
     // Small epsilon deadzone to fully stop when near zero
@@ -122,6 +135,11 @@ void Stepper::update( float dt_sec ) {
     this->set_pwm_freq(freq);
     this->_rpm = dir ? rpm_abs : -rpm_abs;
     this->set_pwm_duty(PWM_DUTY_PERCENT);
+}
+
+void Stepper::set_max_accel_norm( float accel_norm ) {
+    if (accel_norm < 0.0f) accel_norm = -accel_norm;
+    _accel_norm = accel_norm;
 }
 
 void Stepper::set_torque(bool torque ) {

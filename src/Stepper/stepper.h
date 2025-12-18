@@ -30,7 +30,7 @@
 
 // Simple ramp in normalized units per second (|norm| in [0,1])
 #ifndef ACCEL_NORM_PER_S
-#define ACCEL_NORM_PER_S        1.5f
+#define ACCEL_NORM_PER_S        0.1f
 #endif
 
 // Deadzone with hysteresis around zero to avoid flicker
@@ -103,6 +103,8 @@ public:
     void set_velocity( float norm );
     // Update towards target with simple ramp and safe zero-cross logic
     void update( float dt_sec );
+    // Configure maximum acceleration in normalized units per second
+    void set_max_accel_norm( float accel_norm );
     // Immediate torque control (active low enable)
     void set_torque( bool torque ); 
 
