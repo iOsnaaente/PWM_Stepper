@@ -148,6 +148,71 @@ void motor_update_Task(void *pvParameters) {
     }
 }
 
+// Periodic WiFi watcher: logs every state change, periodically refreshes the
+// IP shown on serial + OLED, and runs a one-shot scan for the target SSID if
+// we have not connected within a few seconds.
+void wifi_monitor_Task(void *pvParameters) {
+    (void)pvParameters;
+    bool     last_connected = false;
+    bool     scanned        = false;
+    uint32_t last_log_ms    = 0;
+    const TickType_t period = pdMS_TO_TICKS(1000);
+
+    for (;;) {
+        bool now_connected = wifi_comm && wifi_comm->connected;
+
+        if (now_connected != last_connected) {
+            if (now_connected) {
+                wifi_ip4_t addr;
+                char ip_str[16] = "?";
+                if (wifi_comm->get_local_address(&addr) == COMM_RET_OK) {
+                    snprintf(ip_str, sizeof(ip_str), "%u.%u.%u.%u",
+                        addr.ip[0], addr.ip[1], addr.ip[2], addr.ip[3]);
+                }
+                DEBUG_SERIAL("WIFI", "STATE CHANGE: connected, IP=%s, RSSI=%d",
+                    ip_str, (int)wifi_comm->get_rssi());
+                debug_display_set_ip(ip_str);
+            } else {
+                DEBUG_SERIAL("WIFI", "STATE CHANGE: disconnected");
+                debug_display_set_ip("no wifi");
+            }
+            last_connected = now_connected;
+        }
+
+        // Heartbeat every 5s while disconnected to confirm logging is alive.
+        uint32_t now_ms = millis();
+        if (!now_connected && (now_ms - last_log_ms) >= 5000) {
+            DEBUG_SERIAL("WIFI", "still disconnected (SSID=\"%s\")", WIFI_SSID);
+            last_log_ms = now_ms;
+        } else if (now_connected && (now_ms - last_log_ms) >= 10000) {
+            DEBUG_SERIAL("WIFI", "ok IP=%u.%u.%u.%u RSSI=%d",
+                wifi_comm->ip.ip[0], wifi_comm->ip.ip[1],
+                wifi_comm->ip.ip[2], wifi_comm->ip.ip[3],
+                (int)wifi_comm->get_rssi());
+            last_log_ms = now_ms;
+        }
+
+        // After 15s without a connection, scan once for diagnostics.
+        if (!now_connected && !scanned && now_ms > 15000) {
+            scanned = true;
+            DEBUG_SERIAL("SCAN", "Procurando SSID \"%s\"...", WIFI_SSID);
+            wifi_ap_record_t ap = {};
+            bool found = wifi_scan_once(WIFI_SSID, &ap);
+            if (found) {
+                DEBUG_SERIAL("SCAN",
+                    "AP visivel: RSSI=%d, canal=%d, authmode=%d",
+                    (int)ap.rssi, (int)ap.primary, (int)ap.authmode);
+            } else {
+                DEBUG_SERIAL("SCAN",
+                    "AP \"%s\" NAO visivel (SSID errado? 5GHz? fora de alcance?)",
+                    WIFI_SSID);
+            }
+        }
+
+        vTaskDelay(period);
+    }
+}
+
 // ------------------------------------------------------------------
 // Arduino setup / loop. Guarded against the self-test build flags so
 // only one setup() is compiled at a time.
@@ -217,6 +282,9 @@ void setup() {
 
     // Ramp update task (100 Hz)
     xTaskCreate(motor_update_Task, "MotorUpdate", 4096, NULL, 1, NULL);
+
+    // WiFi watcher (1 Hz): logs state changes, refreshes IP, scans for SSID.
+    xTaskCreate(wifi_monitor_Task, "WiFiMonitor", 4096, NULL, 1, NULL);
 }
 
 void loop() {

@@ -217,6 +217,11 @@ void WiFiComm::wifi_event_handler(
         case WIFI_EVENT_STA_DISCONNECTED:{
             wifi_event_sta_disconnected_t* dis =
                 (wifi_event_sta_disconnected_t*) event_data;
+            comm->connected = false;
+            xEventGroupClearBits(
+                comm->wifi_event_group,
+                comm->WIFI_CONNECTED_BIT
+            );
             if (
                 comm->init_config->auto_connect &&
                 (comm->wifi_retries++) < comm->MAX_WIFI_RETRIES
@@ -226,7 +231,7 @@ void WiFiComm::wifi_event_handler(
                     dis->reason);
                 esp_wifi_connect();
             } else {
-                xEventGroupClearBits(
+                xEventGroupSetBits(
                     comm->wifi_event_group,
                     comm->WIFI_FAILED_BIT
                 );
@@ -262,6 +267,10 @@ void WiFiComm::ip_event_handler(
             );
             ESP_LOGI("IP EVENT", "Station got IP - IP:" IPSTR,
                 IP2STR(&data->ip_info.ip));
+            // Mark connection good for any caller polling these fields and
+            // reset the retry counter so future disconnects get a fresh budget.
+            comm->connected    = true;
+            comm->wifi_retries = 0;
             xEventGroupSetBits(
                 comm->wifi_event_group,
                 comm->WIFI_CONNECTED_BIT
@@ -512,6 +521,7 @@ CommRet_t WiFiComm::start() {
         );
         if (bits & this->WIFI_CONNECTED_BIT) {
             ESP_LOGI("WIFI START", "Conexao WiFi estabelecida com sucesso!");
+            this->connected = true;
         } else {
             ESP_LOGE("WIFI START", "Falha ao conectar no WiFi");
             this->set_last_error( COMM_RET_IO_ERROR );
@@ -553,7 +563,9 @@ CommRet_t WiFiComm::start() {
     ESP_LOGI("WIFI START", "Socket UDP criado e bindado");
 
     // Set state RUNNING *before* spawning tasks so they don't bail
-    this->set_state( COMM_STATE_RUNNING );
+    if (this->connected) {
+        this->set_state( COMM_STATE_RUNNING );
+    }
 
     xTaskCreate(
         wifi_udp_rx_Task,
