@@ -18,3 +18,7 @@
 
 // Max UDP packet size for control packets
 #define UDP_MAX_PACKET_SIZE 64
+
+// ProtocolComm device ID. The handler addresses this robot by this id
+// (PROTO_ID_BROADCAST = 0xFF is also always accepted).
+#define ID_DEVICE  0x01
