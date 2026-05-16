@@ -79,13 +79,13 @@ void setup() {
         DEBUG_SERIAL("KINEM", "IMU module ready");
     }
 
-    // Motors and robot as in main.cpp: A4988, full-step, separate timers
+    // Motors and robot as in main.cpp: DRV8825, full-step, separate timers
     leftMotor  = new Stepper(M1_VEL_PIN, M1_DIR_PIN, ENABLE_PIN,
                              LEDC_CHANNEL_0, LEDC_TIMER_0,
-                             Stepper::DRIVER_A4988, 1, false);
+                             Stepper::DRIVER_DRV8825, 1, false);
     rightMotor = new Stepper(M2_VEL_PIN, M2_DIR_PIN, ENABLE_PIN,
                              LEDC_CHANNEL_1, LEDC_TIMER_1,
-                             Stepper::DRIVER_A4988, 1, true);
+                             Stepper::DRIVER_DRV8825, 1, true);
     robot = new Robot(*leftMotor, *rightMotor);
 
     robot->set_torque(false);

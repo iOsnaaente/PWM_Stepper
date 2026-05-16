@@ -142,11 +142,11 @@ void setup() {
     debug_display_init();
     DEBUG_SERIAL("OLED", "Display debug inicializado");
 
-        // Left motor: A4988 in full-step mode (1 microstep)
+        // Left motor: DRV8825 (microstep setting defined by wiring; keeping 1 here)
         // Use separate LEDC timers so each wheel can run its own step frequency
-        motor_esquerdo = new Stepper( M1_VEL_PIN, M1_DIR_PIN, ENABLE_PIN, LEDC_CHANNEL_0, LEDC_TIMER_0, Stepper::DRIVER_A4988, 1, false );
-        // Right motor: A4988 in full-step mode (inverted to match physical mounting)
-        motor_direito  = new Stepper( M2_VEL_PIN, M2_DIR_PIN, ENABLE_PIN, LEDC_CHANNEL_1, LEDC_TIMER_1, Stepper::DRIVER_A4988, 1, true );
+        motor_esquerdo = new Stepper( M1_VEL_PIN, M1_DIR_PIN, ENABLE_PIN, LEDC_CHANNEL_0, LEDC_TIMER_0, Stepper::DRIVER_DRV8825, 1, false );
+        // Right motor: DRV8825 (inverted to match physical mounting)
+        motor_direito  = new Stepper( M2_VEL_PIN, M2_DIR_PIN, ENABLE_PIN, LEDC_CHANNEL_1, LEDC_TIMER_1, Stepper::DRIVER_DRV8825, 1, true );
     robot = new Robot( *motor_esquerdo, *motor_direito );
     robot->stop();
 

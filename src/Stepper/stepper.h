@@ -19,7 +19,7 @@
 
 // Safer PWM frequency bounds for step pulses
 #define MAX_PWM_FREQ 3000
-#define MIN_PWM_FREQ 300 
+#define MIN_PWM_FREQ 40
 // ( RPM / Segundo ) x ( 360 / STEP_RESOLUTION ) * MICROSTEPS 
 // DRV8825 @ M0/M1/M2=HIGH => 1/32 microstep. RPM2PWM maps RPM to microstep frequency accordingly.
 // f = rpm/60 * (360/step_deg) * microsteps
@@ -54,6 +54,16 @@
 // Fixed STEP pulse high-time in microseconds for the driver (e.g., DRV8825 >=1.9us)
 #ifndef STEP_PULSE_WIDTH_US
 #define STEP_PULSE_WIDTH_US    2.5f
+#endif
+
+// Enable polarity per driver (0 = active-low, 1 = active-high)
+// Typical DRV8825/A4988 modules are active-low on nENBL.
+#ifndef DRV8825_ENABLE_ACTIVE_HIGH
+#define DRV8825_ENABLE_ACTIVE_HIGH 0
+#endif
+
+#ifndef A4988_ENABLE_ACTIVE_HIGH
+#define A4988_ENABLE_ACTIVE_HIGH 0
 #endif
 
 class Stepper {
@@ -105,7 +115,7 @@ public:
     void update( float dt_sec );
     // Configure maximum acceleration in normalized units per second
     void set_max_accel_norm( float accel_norm );
-    // Immediate torque control (active low enable)
+    // Immediate torque control (enable polarity depends on selected driver)
     void set_torque( bool torque ); 
 
     float get_velocity( void );

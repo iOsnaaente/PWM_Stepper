@@ -88,7 +88,7 @@
 #define M2_DIR_PIN        ((gpio_num_t)(GPIO_NUM_5))
 #define M2_VEL_PIN        ((gpio_num_t)(GPIO_NUM_1))
 
-// Enable compartilhado para ambos A4988
+// Enable compartilhado para ambos drivers de stepper
 #define ENABLE_PIN        ((gpio_num_t)(GPIO_NUM_10))
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,19 @@
 #include "Stepper/stepper.h"
 
+namespace {
+inline int enable_level_for(Stepper::StepperDriverType driver, bool torque_enabled) {
+    // Convert logical torque state into electrical EN pin level.
+    if (driver == Stepper::DRIVER_DRV8825) {
+        const int enabled_level  = DRV8825_ENABLE_ACTIVE_HIGH ? 1 : 0;
+        const int disabled_level = DRV8825_ENABLE_ACTIVE_HIGH ? 0 : 1;
+        return torque_enabled ? enabled_level : disabled_level;
+    }
+    const int enabled_level  = A4988_ENABLE_ACTIVE_HIGH ? 1 : 0;
+    const int disabled_level = A4988_ENABLE_ACTIVE_HIGH ? 0 : 1;
+    return torque_enabled ? enabled_level : disabled_level;
+}
+}
+
 Stepper::Stepper(gpio_num_t pwm_pin, gpio_num_t dir_pin, gpio_num_t enable_pin, ledc_channel_t channel, ledc_timer_t timer,
                                  uint8_t microsteps, float pulse_width_us, bool invert_dir)
         : _pwm_pin( pwm_pin ), _dir_pin( dir_pin ), _enb_pin( enable_pin ),
@@ -45,9 +59,8 @@ Stepper::Stepper(gpio_num_t pwm_pin, gpio_num_t dir_pin, gpio_num_t enable_pin, 
     // Seta a diração de giro 
     gpio_set_level( this->_dir_pin, this->_cw_turn );
 
-    // Seta o Torque dos motores 
-    // Active-low enable: LOW = enabled, HIGH = disabled
-    gpio_set_level( this->_enb_pin, this->_torque ? 0 : 1 );
+    // Apply default torque state to EN pin using selected driver polarity.
+    gpio_set_level( this->_enb_pin, enable_level_for(this->_driver, this->_torque) );
 }
 
 Stepper::Stepper(gpio_num_t pwm_pin, gpio_num_t dir_pin, gpio_num_t enable_pin, ledc_channel_t channel, ledc_timer_t timer,
@@ -58,6 +71,8 @@ Stepper::Stepper(gpio_num_t pwm_pin, gpio_num_t dir_pin, gpio_num_t enable_pin, 
               (driver == DRIVER_A4988 ? 2.0f : 3.0f), invert_dir)
 {
     this->_driver = driver;
+    // Re-apply EN level because delegating ctor initializes _driver as DRV8825.
+    gpio_set_level( this->_enb_pin, enable_level_for(this->_driver, this->_torque) );
 }
 
 void Stepper::set_pwm_freq( float freq ) {
@@ -144,7 +159,7 @@ void Stepper::set_max_accel_norm( float accel_norm ) {
 
 void Stepper::set_torque(bool torque ) {
     this->_torque = torque;
-    gpio_set_level( this->_enb_pin, torque ? false : true );
+    gpio_set_level( this->_enb_pin, enable_level_for(this->_driver, this->_torque) );
 }
 
 float Stepper::get_velocity(void) {

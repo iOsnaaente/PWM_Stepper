@@ -15,7 +15,7 @@ public:
     // Direct wheel velocity control (normalized -1..1 each)
     void drive_wheels( float left, float right );
 
-    // Enable/disable motor drivers (active-low enable on DRV8825)
+    // Enable/disable motor drivers (DRV8825 uses inverted enable logic in this project)
     void set_torque(bool torque);
     bool get_torque();
 };
