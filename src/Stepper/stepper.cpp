@@ -10,9 +10,25 @@ Stepper::Stepper(gpio_num_t pwm_pin, gpio_num_t dir_pin, gpio_num_t enable_pin, 
             _current_norm(0.0f), _target_norm(0.0f), _accel_norm(ACCEL_NORM_PER_S), _invert_dir(invert_dir),
             _last_applied_norm(0.0f), _in_deadzone(true), _last_freq_applied(0.0f)
 {
+    // Force EN HIGH (A4988 disabled, active-low) BEFORE reconfiguring the pin,
+    // so we never re-enter a window where the driver could be enabled.
+    gpio_set_level(_enb_pin, 1);
+
+    // EN gets internal pull-up so it stays HIGH (= disabled) even if the pin
+    // briefly returns to high-impedance during reconfiguration or reset.
+    gpio_config_t en_cfg = {
+        .pin_bit_mask = (1ULL << _enb_pin),
+        .mode         = GPIO_MODE_OUTPUT,
+        .pull_up_en   = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type    = GPIO_INTR_DISABLE
+    };
+    gpio_config(&en_cfg);
+    gpio_set_level(_enb_pin, 1);
+
     // Configura pino de direção
     gpio_config_t dir_cfg = {
-        .pin_bit_mask = (1ULL << _dir_pin) | (1ULL << _enb_pin),
+        .pin_bit_mask = (1ULL << _dir_pin),
         .mode         = GPIO_MODE_OUTPUT,
         .pull_up_en   = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,

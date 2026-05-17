@@ -109,7 +109,14 @@ static void handle_set_target_vel(
     memcpy(&right, msg->packet.payload + sizeof(float), sizeof(float));
 
     apply_wheel_command(left, right);
-    DEBUG_SERIAL("CTRL", "L=%.2f R=%.2f", left, right);
+
+    // Throttled CTRL log (~4 Hz) so OLED + serial don't drown at command rates.
+    static uint32_t last_ctrl_log_ms = 0;
+    uint32_t now_ms = millis();
+    if (now_ms - last_ctrl_log_ms >= 250) {
+        DEBUG_SERIAL("CTRL", "L=%.2f R=%.2f", left, right);
+        last_ctrl_log_ms = now_ms;
+    }
 }
 
 static void handle_stop(
@@ -148,18 +155,23 @@ void motor_update_Task(void *pvParameters) {
     }
 }
 
-// Periodic WiFi watcher: logs every state change, periodically refreshes the
-// IP shown on serial + OLED, and runs a one-shot scan for the target SSID if
-// we have not connected within a few seconds.
+// Periodic WiFi watcher: logs state changes, refreshes IP shown on
+// serial + OLED, runs a periodic scan when down, and drives a backoff
+// reconnect cycle when the event-handler retry budget is exhausted.
 void wifi_monitor_Task(void *pvParameters) {
     (void)pvParameters;
-    bool     last_connected = false;
-    bool     scanned        = false;
-    uint32_t last_log_ms    = 0;
-    const TickType_t period = pdMS_TO_TICKS(1000);
+    bool     last_connected      = false;
+    uint32_t last_log_ms         = 0;
+    uint32_t last_scan_ms        = 0;
+    uint32_t disconnected_since  = 0;
+    uint32_t backoff_ms          = 2000;   // grows up to BACKOFF_MAX_MS
+    uint32_t last_reconnect_ms   = 0;
+    const uint32_t BACKOFF_MAX_MS = 30000;
+    const TickType_t period      = pdMS_TO_TICKS(1000);
 
     for (;;) {
         bool now_connected = wifi_comm && wifi_comm->connected;
+        uint32_t now_ms = millis();
 
         if (now_connected != last_connected) {
             if (now_connected) {
@@ -172,17 +184,22 @@ void wifi_monitor_Task(void *pvParameters) {
                 DEBUG_SERIAL("WIFI", "STATE CHANGE: connected, IP=%s, RSSI=%d",
                     ip_str, (int)wifi_comm->get_rssi());
                 debug_display_set_ip(ip_str);
+                backoff_ms = 2000;          // fresh start
+                disconnected_since = 0;
             } else {
                 DEBUG_SERIAL("WIFI", "STATE CHANGE: disconnected");
                 debug_display_set_ip("no wifi");
+                disconnected_since = now_ms;
+                last_reconnect_ms  = now_ms;
             }
             last_connected = now_connected;
         }
 
-        // Heartbeat every 5s while disconnected to confirm logging is alive.
-        uint32_t now_ms = millis();
+        // Heartbeat / status log.
         if (!now_connected && (now_ms - last_log_ms) >= 5000) {
-            DEBUG_SERIAL("WIFI", "still disconnected (SSID=\"%s\")", WIFI_SSID);
+            DEBUG_SERIAL("WIFI", "down %us backoff=%ums",
+                (unsigned)((now_ms - disconnected_since) / 1000),
+                (unsigned)backoff_ms);
             last_log_ms = now_ms;
         } else if (now_connected && (now_ms - last_log_ms) >= 10000) {
             DEBUG_SERIAL("WIFI", "ok IP=%u.%u.%u.%u RSSI=%d",
@@ -192,20 +209,31 @@ void wifi_monitor_Task(void *pvParameters) {
             last_log_ms = now_ms;
         }
 
-        // After 15s without a connection, scan once for diagnostics.
-        if (!now_connected && !scanned && now_ms > 15000) {
-            scanned = true;
-            DEBUG_SERIAL("SCAN", "Procurando SSID \"%s\"...", WIFI_SSID);
+        // Backoff-paced reconnect once the event handler stopped trying.
+        if (!now_connected &&
+            (now_ms - last_reconnect_ms) >= backoff_ms)
+        {
+            DEBUG_SERIAL("WIFI", "Reconnect (backoff %ums)",
+                (unsigned)backoff_ms);
+            esp_wifi_disconnect();
+            esp_wifi_connect();
+            last_reconnect_ms = now_ms;
+            backoff_ms = (backoff_ms * 2 < BACKOFF_MAX_MS)
+                       ? backoff_ms * 2
+                       : BACKOFF_MAX_MS;
+        }
+
+        // Periodic scan every 20s while disconnected, for diagnostics.
+        if (!now_connected && (now_ms - last_scan_ms) >= 20000) {
+            last_scan_ms = now_ms;
             wifi_ap_record_t ap = {};
             bool found = wifi_scan_once(WIFI_SSID, &ap);
             if (found) {
                 DEBUG_SERIAL("SCAN",
-                    "AP visivel: RSSI=%d, canal=%d, authmode=%d",
+                    "AP visivel RSSI=%d ch=%d auth=%d",
                     (int)ap.rssi, (int)ap.primary, (int)ap.authmode);
             } else {
-                DEBUG_SERIAL("SCAN",
-                    "AP \"%s\" NAO visivel (SSID errado? 5GHz? fora de alcance?)",
-                    WIFI_SSID);
+                DEBUG_SERIAL("SCAN", "AP \"%s\" NAO visivel", WIFI_SSID);
             }
         }
 
@@ -221,7 +249,38 @@ void wifi_monitor_Task(void *pvParameters) {
     && !defined(GY521_SELF_TEST) && !defined(KINEMATICS_SELF_TEST) \
     && !defined(STRAIGHT_SELF_TEST)
 
+// Force A4988 EN HIGH (disabled) and STEP/DIR LOW the instant setup() runs,
+// before any other init can stall. A4988 EN has an internal pull-DOWN, so a
+// floating EN reads LOW and enables the H-bridges. Energized coils during the
+// USB-CDC wait + OLED init cause a 3.3V sag that triggers brownout reset.
+static void motors_safe_init(void) {
+    gpio_config_t en_cfg = {
+        .pin_bit_mask = (1ULL << ENABLE_PIN),
+        .mode         = GPIO_MODE_OUTPUT,
+        .pull_up_en   = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type    = GPIO_INTR_DISABLE
+    };
+    gpio_config(&en_cfg);
+    gpio_set_level(ENABLE_PIN, 1);  // A4988 EN active-low: HIGH = disabled
+
+    gpio_config_t step_cfg = {
+        .pin_bit_mask = (1ULL << M1_VEL_PIN) | (1ULL << M2_VEL_PIN)
+                      | (1ULL << M1_DIR_PIN) | (1ULL << M2_DIR_PIN),
+        .mode         = GPIO_MODE_OUTPUT,
+        .pull_up_en   = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_ENABLE,
+        .intr_type    = GPIO_INTR_DISABLE
+    };
+    gpio_config(&step_cfg);
+    gpio_set_level(M1_VEL_PIN, 0);
+    gpio_set_level(M2_VEL_PIN, 0);
+    gpio_set_level(M1_DIR_PIN, 0);
+    gpio_set_level(M2_DIR_PIN, 0);
+}
+
 void setup() {
+    motors_safe_init();
     serial_debugger_init();
     DEBUG_SERIAL("RESET", "Reset reason: %d", (int)esp_reset_reason());
     DEBUG_SERIAL("SERIAL INIT", "Baudrate: %d", USB_BUS_BAUDRATE);
@@ -229,15 +288,29 @@ void setup() {
     debug_display_init();
     DEBUG_SERIAL("OLED", "Display debug inicializado");
 
-    // Motors: A4988 full-step (1 microstep). Right motor inverted to match mounting.
+    // Reset reason logged AFTER OLED init so the message survives USB-CDC
+    // re-enumeration (the line printed earlier is often lost on reboot loops).
+    int rr = (int)esp_reset_reason();
+    DEBUG_SERIAL("BOOT", "ResetReason=%d (1=POR 3=SW 8=WDT 11=PANIC 14=BROWNOUT)", rr);
+
+    // Granular logs around motor construction so we know which step crashes.
+    DEBUG_SERIAL("BOOT", "Stepper L ctor begin");
     motor_esquerdo = new Stepper(M1_VEL_PIN, M1_DIR_PIN, ENABLE_PIN,
                                  LEDC_CHANNEL_0, LEDC_TIMER_0,
                                  Stepper::DRIVER_A4988, 1, false);
+    DEBUG_SERIAL("BOOT", "Stepper L ctor done");
+
+    DEBUG_SERIAL("BOOT", "Stepper R ctor begin");
     motor_direito  = new Stepper(M2_VEL_PIN, M2_DIR_PIN, ENABLE_PIN,
                                  LEDC_CHANNEL_1, LEDC_TIMER_1,
                                  Stepper::DRIVER_A4988, 1, true);
+    DEBUG_SERIAL("BOOT", "Stepper R ctor done");
+
     robot = new Robot(*motor_esquerdo, *motor_direito);
+    DEBUG_SERIAL("BOOT", "Robot ctor done");
+
     robot->stop();
+    DEBUG_SERIAL("BOOT", "Robot stop done");
 
     DEBUG_SERIAL("POWER", "Aguardando %lu ms antes de iniciar WiFi",
         (unsigned long)WIFI_START_DELAY_MS);

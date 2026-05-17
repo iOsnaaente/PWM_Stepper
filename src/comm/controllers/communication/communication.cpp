@@ -8,6 +8,7 @@
 
 #include "communication.h"
 #include "communication_utils.h"
+#include "Serial/SerialDebugger.h"
 
 ESP_EVENT_DEFINE_BASE( PROTO_EVENT_BASE );
 
@@ -130,6 +131,22 @@ void ProtocolComm::parser_Handle(){
         if ( !ret ) {
             ESP_LOGW("PROTO COMM", "Erro ao desempacotar mensagem recebida");
             continue;
+        }
+
+        // Throttled RX log (~4 Hz) so the OLED + serial don't drown at command rates.
+        // Logs every packet that parsed, before the ID filter drops anything.
+        {
+            static uint32_t last_rx_log_ms = 0;
+            uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+            if (now_ms - last_rx_log_ms >= 250) {
+                DEBUG_SERIAL("COMM",
+                    "RX len=%u id=0x%02X cmd=0x%02X seq=%u",
+                    (unsigned)raw_msg.length,
+                    (unsigned)packet.header.id,
+                    (unsigned)packet.header.cmd,
+                    (unsigned)packet.header.seq);
+                last_rx_log_ms = now_ms;
+            }
         }
 
         parsed_msg = new ProtocolParsed_t();

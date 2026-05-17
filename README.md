@@ -14,7 +14,6 @@ Para evitar expor SSID/Senha no repositório, foi adicionado um mecanismo de tem
 2. Edite `include/credentials.h` e preencha:
 	 - `WIFI_SSID`
 	 - `WIFI_PASSWORD`
-	 - (Opcional) `UDP_ALLOWED_REMOTE_IP` (defina um IP específico para restringir o controle)  
 3. Compile e faça o upload normalmente com o PlatformIO.
 
 > O arquivo `include/credentials.h` está listado no `.gitignore` e não será versionado.
@@ -25,7 +24,6 @@ Para evitar expor SSID/Senha no repositório, foi adicionado um mecanismo de tem
 | `WIFI_SSID` | Nome da rede WiFi para conexão |
 | `WIFI_PASSWORD` | Senha da rede WiFi |
 | `UDP_LISTEN_PORT` | Porta UDP onde o firmware escuta comandos |
-| `UDP_ALLOWED_REMOTE_IP` | IP autorizado a enviar comandos ("0.0.0.0" = qualquer um) |
 | `UDP_MAX_PACKET_SIZE` | Tamanho máximo de pacote UDP aceito |
 
 ### Formatos de Pacote de Controle
@@ -36,7 +34,6 @@ O listener UDP aceita múltiplos formatos para dirigir as rodas independentement
 
 ### Segurança Básica
 Para evitar acessos indevidos:
-- Defina `UDP_ALLOWED_REMOTE_IP` com o IP do controlador.
 - Use uma VLAN ou rede isolada em ambientes críticos.
 - Avalie adicionar autenticação no protocolo caso seja exposto fora de rede local.
 

@@ -222,22 +222,26 @@ void WiFiComm::wifi_event_handler(
                 comm->wifi_event_group,
                 comm->WIFI_CONNECTED_BIT
             );
-            if (
-                comm->init_config->auto_connect &&
-                (comm->wifi_retries++) < comm->MAX_WIFI_RETRIES
-            ) {
-                ESP_LOGW("WIFI EVENT",
-                    "REASON[%d]: STA desconectada. Tentando reconectar...",
-                    dis->reason);
-                esp_wifi_connect();
-            } else {
+            if ( !comm->init_config->auto_connect ) {
+                break;
+            }
+            comm->wifi_retries++;
+            ESP_LOGW("WIFI EVENT",
+                "REASON[%d]: STA desconectada. Tentativa %u",
+                dis->reason, (unsigned)comm->wifi_retries);
+            // Keep retrying forever, but flag failure after MAX_WIFI_RETRIES
+            // so the monitor task can take over with longer backoff cadence.
+            if ( comm->wifi_retries >= comm->MAX_WIFI_RETRIES ) {
                 xEventGroupSetBits(
                     comm->wifi_event_group,
                     comm->WIFI_FAILED_BIT
                 );
                 ESP_LOGE("WIFI EVENT",
-                    "Falha ao conectar no AP apos %d tentativas.",
-                    comm->MAX_WIFI_RETRIES);
+                    "Falha persistente apos %u tentativas - monitor assume.",
+                    (unsigned)comm->MAX_WIFI_RETRIES);
+                // Do NOT reconnect here: monitor task will pace retries.
+            } else {
+                esp_wifi_connect();
             }
             break;
         }
@@ -361,6 +365,10 @@ CommRet_t WiFiComm::init( ) {
             esp_err_to_name(ret) );
         return COMM_RET_IO_ERROR;
     }
+
+    // Keep WiFi config in RAM only: avoids NVS wear and prevents stale config
+    // from interfering with reconnects after an unclean shutdown.
+    esp_wifi_set_storage(WIFI_STORAGE_RAM);
     ret = esp_event_handler_instance_register(
         WIFI_EVENT, ESP_EVENT_ANY_ID,
         &wifi_event_handler,
@@ -391,6 +399,14 @@ CommRet_t WiFiComm::init( ) {
             esp_err_to_name(ret) );
         return COMM_RET_IO_ERROR;
     }
+
+    // Disable power save: default WIFI_PS_MIN_MODEM hurts association/keepalive
+    // on weak signals and is the single biggest stability win on ESP32-C3.
+    esp_wifi_set_ps(WIFI_PS_NONE);
+
+    // Force maximum TX power (80 * 0.25 = 20 dBm). Helps mask the
+    // ESP32-C3 Super Mini PCB-antenna mismatch.
+    esp_wifi_set_max_tx_power(80);
     esp_netif_t *net_interface = nullptr;
     if (
         this->mode == WIFI_MODE_STA ||
@@ -562,10 +578,11 @@ CommRet_t WiFiComm::start() {
     }
     ESP_LOGI("WIFI START", "Socket UDP criado e bindado");
 
-    // Set state RUNNING *before* spawning tasks so they don't bail
-    if (this->connected) {
-        this->set_state( COMM_STATE_RUNNING );
-    }
+    // Always set RUNNING once the socket is bound. The RX/TX tasks gate on
+    // state == RUNNING; if we left it as FAULT (because initial connect timed
+    // out), the tasks would idle forever even after WiFi connects later.
+    // WiFi reachability is tracked separately via `connected`.
+    this->set_state( COMM_STATE_RUNNING );
 
     xTaskCreate(
         wifi_udp_rx_Task,
