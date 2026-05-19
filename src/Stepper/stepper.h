@@ -28,7 +28,9 @@
 // Legacy RPM->frequency macro kept for reference; implementation now per-instance
 #define RPM2PWM(rpm) (uint32_t)fmaxf(fminf(((rpm) / 60.0f) * (360.0f / STEP_RESOLUTION) * MICRO_STEP_RESOLUTION, MAX_PWM_FREQ), MIN_PWM_FREQ)
 
-// Simple ramp in normalized units per second (|norm| in [0,1])
+// Simple ramp in normalized units per second (|norm| in [0,1]).
+// 5.0 -> 0..1 in 200ms. Tune higher if the driver/motor handle it without
+// skipping steps. set_velocity(0) snaps to zero regardless of this value.
 #ifndef ACCEL_NORM_PER_S
 #define ACCEL_NORM_PER_S        0.1f
 #endif

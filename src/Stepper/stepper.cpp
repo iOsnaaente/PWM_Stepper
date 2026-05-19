@@ -106,6 +106,13 @@ void Stepper::set_pwm_duty( float duty_percent ) {
 void Stepper::set_velocity( float norm ) {
     // Store target command; update() will ramp _current_norm toward this
     _target_norm = fminf( fmaxf( norm, -1.0f ), 1.0f );
+    // Snap to zero on stop command - the ramp would otherwise coast the motor
+    // for a noticeable time after the operator releases the key.
+    if (_target_norm == 0.0f) {
+        _current_norm = 0.0f;
+        _rpm          = 0.0f;
+        ledc_stop(LEDC_SPEED_MODE, this->_pwm_channel, false);
+    }
 }
 
 void Stepper::update( float dt_sec ) {
