@@ -22,18 +22,26 @@
 
 #include "interfaces/comm_base.h"
 #include "interfaces/proto_base.h"
-#include "modules/wifi/wifi_comm.h"
 #include "controllers/communication/communication.h"
 
-#ifndef WIFI_SSID
-#error "WIFI_SSID nao definido. Copie include/credentials.template.h para include/credentials.h."
+#ifdef USE_ESPNOW_TRANSPORT
+  #include "modules/espnow/espnow_comm.h"
+  #ifndef ESPNOW_CHANNEL
+    #define ESPNOW_CHANNEL 6
+  #endif
+#else
+  #include "modules/wifi/wifi_comm.h"
+  #ifndef WIFI_SSID
+  #error "WIFI_SSID nao definido. Copie include/credentials.template.h para include/credentials.h."
+  #endif
+  #ifndef WIFI_PASSWORD
+  #error "WIFI_PASSWORD nao definido."
+  #endif
+  #ifndef UDP_LISTEN_PORT
+  #error "UDP_LISTEN_PORT nao definido."
+  #endif
 #endif
-#ifndef WIFI_PASSWORD
-#error "WIFI_PASSWORD nao definido."
-#endif
-#ifndef UDP_LISTEN_PORT
-#error "UDP_LISTEN_PORT nao definido."
-#endif
+
 #ifndef ID_DEVICE
 #define ID_DEVICE 0x01
 #endif
@@ -48,9 +56,14 @@ Robot   *robot          = nullptr;
 // ------------------------------------------------------------------
 // Communication stack
 // ------------------------------------------------------------------
-static wifi_comm_config_t   wifi_config = {};
-static WiFiComm            *wifi_comm   = nullptr;
-static ProtocolComm        *comm        = nullptr;
+#ifdef USE_ESPNOW_TRANSPORT
+static espnow_comm_config_t   espnow_config = {};
+static ESPNowComm            *espnow_comm   = nullptr;
+#else
+static wifi_comm_config_t     wifi_config   = {};
+static WiFiComm              *wifi_comm     = nullptr;
+#endif
+static ProtocolComm          *comm          = nullptr;
 
 // ------------------------------------------------------------------
 // Watchdog: stop motors if no command arrives within timeout
@@ -155,6 +168,7 @@ void motor_update_Task(void *pvParameters) {
     }
 }
 
+#ifndef USE_ESPNOW_TRANSPORT
 // Periodic WiFi watcher: logs state changes, refreshes IP shown on
 // serial + OLED, runs a periodic scan when down, and drives a backoff
 // reconnect cycle when the event-handler retry budget is exhausted.
@@ -240,6 +254,7 @@ void wifi_monitor_Task(void *pvParameters) {
         vTaskDelay(period);
     }
 }
+#endif  // !USE_ESPNOW_TRANSPORT
 
 // ------------------------------------------------------------------
 // Arduino setup / loop. Guarded against the self-test build flags so
@@ -312,10 +327,20 @@ void setup() {
     robot->stop();
     DEBUG_SERIAL("BOOT", "Robot stop done");
 
-    DEBUG_SERIAL("POWER", "Aguardando %lu ms antes de iniciar WiFi",
+    DEBUG_SERIAL("POWER", "Aguardando %lu ms antes de iniciar comm",
         (unsigned long)WIFI_START_DELAY_MS);
     delay(WIFI_START_DELAY_MS);
 
+#ifdef USE_ESPNOW_TRANSPORT
+    // ---- ProtocolComm + ESPNowComm bring-up (broadcast, fixed channel) ----
+    espnow_config.channel    = (uint8_t)ESPNOW_CHANNEL;
+    static const uint8_t broadcast_mac[6] = ESPNOW_BROADCAST_MAC;
+    memcpy(espnow_config.peer_mac, broadcast_mac, 6);
+    espnow_config.auto_start = true;
+
+    espnow_comm = new ESPNowComm("ESPNow", &espnow_config);
+    comm        = new ProtocolComm("Communication", ID_DEVICE, espnow_comm);
+#else
     // ---- ProtocolComm + WiFiComm bring-up ----
     wifi_config.mode = WIFI_MODE_STA;
     wifi_config.sta.ssid     = WIFI_SSID;
@@ -326,6 +351,7 @@ void setup() {
 
     wifi_comm = new WiFiComm("WiFi_UDP", &wifi_config, UDP_LISTEN_PORT);
     comm      = new ProtocolComm("Communication", ID_DEVICE, wifi_comm);
+#endif
 
     comm->create_event_loop();
 
@@ -336,10 +362,21 @@ void setup() {
     comm->register_event_loop_callback(handle_ping,
                                        PROTO_CMD_PING, nullptr);
 
-    // Initialize CommBase (WiFi up + UDP RX/TX tasks) and start protocol tasks.
+    // Initialize the transport (WiFi/UDP or ESP-NOW) + start protocol tasks.
     CommRet_t cret = comm->init();
     DEBUG_SERIAL("COMM", "ProtocolComm init -> %s", comm_ret_to_str(cret));
 
+#ifdef USE_ESPNOW_TRANSPORT
+    uint8_t self_mac[6] = {0};
+    esp_read_mac(self_mac, ESP_MAC_WIFI_STA);
+    char mac_str[20];
+    snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+        self_mac[0], self_mac[1], self_mac[2],
+        self_mac[3], self_mac[4], self_mac[5]);
+    DEBUG_SERIAL("ESPNOW", "ch=%d id=0x%02X MAC=%s",
+        ESPNOW_CHANNEL, (int)ID_DEVICE, mac_str);
+    debug_display_set_ip(mac_str);
+#else
     if (wifi_comm->connected) {
         wifi_ip4_t addr;
         wifi_comm->get_local_address(&addr);
@@ -352,12 +389,15 @@ void setup() {
     } else {
         DEBUG_SERIAL("WIFI", "Not connected (continuing)");
     }
+#endif
 
     // Ramp update task (100 Hz)
     xTaskCreate(motor_update_Task, "MotorUpdate", 4096, NULL, 1, NULL);
 
+#ifndef USE_ESPNOW_TRANSPORT
     // WiFi watcher (1 Hz): logs state changes, refreshes IP, scans for SSID.
     xTaskCreate(wifi_monitor_Task, "WiFiMonitor", 4096, NULL, 1, NULL);
+#endif
 }
 
 void loop() {
