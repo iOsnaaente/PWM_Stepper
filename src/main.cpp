@@ -367,15 +367,11 @@ void setup() {
     DEBUG_SERIAL("COMM", "ProtocolComm init -> %s", comm_ret_to_str(cret));
 
 #ifdef USE_ESPNOW_TRANSPORT
-    uint8_t self_mac[6] = {0};
-    esp_read_mac(self_mac, ESP_MAC_WIFI_STA);
-    char mac_str[20];
-    snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
-        self_mac[0], self_mac[1], self_mac[2],
-        self_mac[3], self_mac[4], self_mac[5]);
-    DEBUG_SERIAL("ESPNOW", "ch=%d id=0x%02X MAC=%s",
-        ESPNOW_CHANNEL, (int)ID_DEVICE, mac_str);
-    debug_display_set_ip(mac_str);
+    DEBUG_SERIAL("ESPNOW", "ch=%d id=0x%02X (broadcast)",
+        ESPNOW_CHANNEL, (int)ID_DEVICE);
+    char status_str[16];
+    snprintf(status_str, sizeof(status_str), "ESP-NOW ch%d", ESPNOW_CHANNEL);
+    debug_display_set_ip(status_str);
 #else
     if (wifi_comm->connected) {
         wifi_ip4_t addr;
